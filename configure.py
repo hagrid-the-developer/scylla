@@ -244,6 +244,7 @@ scylla_tests = [
     'tests/vint_serialization_test',
     'tests/castas_fcts_test',
     'tests/compress_test',
+    'tests/chunked_vector_test',
 ]
 
 apps = [
@@ -629,7 +630,11 @@ pure_boost_tests = set([
     'tests/streaming_histogram_test',
     'tests/duration_test',
     'tests/vint_serialization_test',
+<<<<<<< 4a9474d46959015b2e76b29d0ae5fc9d432f39c3
     'tests/compress_test',
+=======
+    'tests/chunked_vector_test',
+>>>>>>> tests: add test for chunked_vector
 ])
 
 tests_not_using_seastar_test_framework = set([
