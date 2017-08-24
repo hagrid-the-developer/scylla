@@ -141,6 +141,30 @@ selectable::with_field_selection::raw::processes_selection() const {
     return true;
 }
 
+shared_ptr<selector::factory>
+selectable::with_cast::new_selector_factory(database& db, schema_ptr s, std::vector<const column_definition*>& defs) {
+    // XYZ: check that conversion is possible
+    // XYZ: Create conversion function from some abstract function...
+    return {};
+}
+
+sstring
+selectable::with_cast::to_string() const {
+    // XYZ: Is it necessary to call to_string() ?
+    return sprint("cast(%s as %s)", _arg->to_string(), _type->to_string());
+}
+
+shared_ptr<selectable>
+selectable::with_cast::raw::prepare(schema_ptr s) {
+    return ::make_shared<selectable::with_cast>(_arg->prepare(s), _type);
+}
+
+bool
+selectable::with_cast::raw::processes_selection() const {
+    // XYZ: What to return here?
+    return true;
+}
+
 std::ostream & operator<<(std::ostream &os, const selectable& s) {
     return os << s.to_string();
 }
