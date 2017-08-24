@@ -243,7 +243,6 @@ scylla_tests = [
     'tests/duration_test',
     'tests/vint_serialization_test',
     'tests/castas_fcts_test',
-    'tests/compress_test',
 ]
 
 apps = [
@@ -629,7 +628,6 @@ pure_boost_tests = set([
     'tests/streaming_histogram_test',
     'tests/duration_test',
     'tests/vint_serialization_test',
-    'tests/compress_test',
 ])
 
 tests_not_using_seastar_test_framework = set([
