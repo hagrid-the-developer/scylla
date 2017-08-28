@@ -244,6 +244,7 @@ scylla_tests = [
     'tests/vint_serialization_test',
     'tests/castas_fcts_test',
     'tests/chunked_vector_test',
+    'tests/compress_test',
 ]
 
 apps = [
@@ -629,6 +630,7 @@ pure_boost_tests = set([
     'tests/streaming_histogram_test',
     'tests/duration_test',
     'tests/vint_serialization_test',
+<<<<<<< b0fd6533d4de2ceb72e4fdcf3943de546bc3699d
 <<<<<<< 263522bc65b3e82ef40c5484c7c4f3129af2a519
 <<<<<<< 4a9474d46959015b2e76b29d0ae5fc9d432f39c3
     'tests/compress_test',
@@ -637,6 +639,9 @@ pure_boost_tests = set([
 >>>>>>> tests: add test for chunked_vector
 =======
 >>>>>>> Revert "Revert "Revert "Merge "Compress in-memory compression-info" from Botond"""
+=======
+    'tests/compress_test',
+>>>>>>> Revert "Revert "Revert "Revert "Merge "Compress in-memory compression-info" from Botond""""
 ])
 
 tests_not_using_seastar_test_framework = set([
