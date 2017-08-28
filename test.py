@@ -85,6 +85,7 @@ boost_tests = [
     'view_schema_test',
     'combined_mutation_reader_test',
     'castas_fcts_test',
+    'clustering_ranges_walker_test',
 ]
 
 other_tests = [
