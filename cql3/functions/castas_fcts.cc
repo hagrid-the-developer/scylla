@@ -25,7 +25,7 @@ make_castas_function() {
     auto from_type = data_type_for<FromType>();
     auto to_type = data_type_for<ToType>();
     auto name = "castas" + to_type->as_cql3_type()->to_string();
-    return make_native_scalar_function<true>(name, from_type, { to_type },
+    return make_native_scalar_function<true>(name, to_type, { from_type },
             [] (cql_serialization_format sf, const std::vector<bytes_opt>& parameters) -> opt_bytes {
         auto&& val = parameters[0];
         if (!val) {
@@ -63,7 +63,7 @@ shared_ptr<function> castas_functions::get(data_type to_type, const std::vector<
 
     auto it_candidate = _declared.find(castas_functions::Key{to_type, from_type});
     if (it_candidate == _declared.end())
-        throw exceptions::invalid_request_exception(sprint("Cannot cast %s to %s", from_type->name(), to_type->name()));
+        throw exceptions::invalid_request_exception(sprint("%s cannot be cast to %s", from_type->name(), to_type->name()));
 
     return it_candidate->second;
 }
