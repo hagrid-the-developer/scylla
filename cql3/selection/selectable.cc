@@ -25,6 +25,7 @@
 #include "writetime_or_ttl.hh"
 #include "selector_factories.hh"
 #include "cql3/functions/functions.hh"
+#include "cql3/functions/castas_fcts.hh"
 #include "abstract_function_selector.hh"
 #include "writetime_or_ttl_selector.hh"
 
@@ -143,9 +144,14 @@ selectable::with_field_selection::raw::processes_selection() const {
 
 shared_ptr<selector::factory>
 selectable::with_cast::new_selector_factory(database& db, schema_ptr s, std::vector<const column_definition*>& defs) {
-    // XYZ: check that conversion is possible
-    // XYZ: Create conversion function from some abstract function...
-    return {};
+    // XYZ: This conversaion to array is ugly. :-(
+    std::vector<shared_ptr<selectable>> args{_arg};
+    auto&& factories = selector_factories::create_factories_and_collect_column_definitions(args, db, s, defs);
+    std::cerr << "selectable::with_cast::new_selector_factory(): " << defs.size() << "; " << "type: " << _type << "factories.size:" << factories->new_instances().size() << std::endl;
+    auto &&fun = functions::castas_functions::get(_type->get_type(), factories->new_instances(), s);
+    // XYZ: assert(fun);
+
+    return abstract_function_selector::new_factory(std::move(fun), std::move(factories));
 }
 
 sstring
