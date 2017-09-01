@@ -9,7 +9,11 @@ namespace {
 using opt_bytes = std::experimental::optional<bytes>;
 
 template<typename ToType, typename FromType>
-struct CastAs { };
+struct CastAs {
+    ToType operator()(const FromType x) {
+        return ToType(x);
+    }
+};
 
 template<>
 struct CastAs<double, int> {
@@ -19,35 +23,72 @@ struct CastAs<double, int> {
 };
 
 template<typename ToType, typename FromType>
-inline
-shared_ptr<function>
-make_castas_function() {
-    auto from_type = data_type_for<FromType>();
-    auto to_type = data_type_for<ToType>();
-    auto name = "castas" + to_type->as_cql3_type()->to_string();
-    return make_native_scalar_function<true>(name, to_type, { from_type },
+struct MakeCastAsFunction {
+    shared_ptr<function> operator()() {
+        auto from_type = data_type_for<FromType>();
+        auto to_type = data_type_for<ToType>();
+        auto name = "castas" + to_type->as_cql3_type()->to_string();
+        return make_native_scalar_function<true>(name, to_type, { from_type },
             [] (cql_serialization_format sf, const std::vector<bytes_opt>& parameters) -> opt_bytes {
-        auto&& val = parameters[0];
-        if (!val) {
-            return val;
-        }
-        FromType val_from = value_cast<FromType>(data_type_for<FromType>()->deserialize(*val));
-        ToType val_to = CastAs<ToType, FromType>{}(val_from);
-        return data_type_for<ToType>()->decompose(val_to);
-    });
-}
+            auto&& val = parameters[0];
+            if (!val) {
+                return val;
+            }
+            FromType val_from = value_cast<FromType>(data_type_for<FromType>()->deserialize(*val));
+            ToType val_to = CastAs<ToType, FromType>{}(val_from);
+            return data_type_for<ToType>()->decompose(val_to);
+        });
+    }
+};
+
+template<typename FromType>
+struct MakeCastAsFunction<sstring, FromType> {
+    shared_ptr<function> operator()() {
+        auto from_type = data_type_for<FromType>();
+        auto to_type = data_type_for<sstring>();
+        auto name = "castas" + to_type->as_cql3_type()->to_string();
+        return make_native_scalar_function<true>(name, to_type, { from_type },
+            [] (cql_serialization_format sf, const std::vector<bytes_opt>& parameters) -> opt_bytes {
+            auto&& val = parameters[0];
+            if (!val) {
+                return val;
+            }
+            return data_type_for<sstring>()->decompose(data_type_for<FromType>()->to_string(*val));
+        });
+    }
+};
 
 template<typename ToType, typename FromType>
 void declare_castas_function(castas_functions::Map &map) {
     map.emplace(castas_functions::Key{data_type_for<ToType>(), data_type_for<FromType>()},
-                make_castas_function<ToType, FromType>());
+                MakeCastAsFunction<ToType, FromType>{}());
 }
+
+template <typename FromType, typename ...ToTypes>
+struct FromToImpl;
+template <typename FromType>
+struct FromToImpl<FromType> {
+    static void decl(castas_functions::Map&) {
+    }
+};
+template <typename FromType, typename ToType, typename ...ToTypes>
+struct FromToImpl<FromType, ToType, ToTypes...> {
+    static void decl(castas_functions::Map &map) {
+        declare_castas_function<ToType, FromType>(map);
+        FromToImpl<FromType, ToTypes...>::decl(map);
+    }
+};
+
+template <typename FromType>
+struct From {
+    template <typename ...ToTypes>
+    using To = FromToImpl<FromType, ToTypes...>;
+};
 
 static castas_functions::Map
 init() {
     castas_functions::Map ret;
-    declare_castas_function<double, int>(ret);
-
+    From<int>::To<float, double, sstring>::decl(ret);
     return ret;
 }
 
@@ -59,7 +100,7 @@ shared_ptr<function> castas_functions::get(data_type to_type, const std::vector<
     if (provided_args.size() != 1)
         throw exceptions::invalid_request_exception("Invalid CAST expression");
     auto from_type = provided_args[0]->get_type();
-    std::cerr << "XYZ: ToType:" << to_type->name() << "; " << provided_args.size() << "from-type:" << from_type->name() << std::endl;
+    std::cerr << "XYZ: ToType:" << to_type->name() << "from-type:" << from_type->name() << std::endl;
 
     auto it_candidate = _declared.find(castas_functions::Key{to_type, from_type});
     if (it_candidate == _declared.end())
