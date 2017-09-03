@@ -35,7 +35,7 @@ struct MakeCastAsFunction {
                 return val;
             }
             FromType val_from = value_cast<FromType>(data_type_for<FromType>()->deserialize(*val));
-            ToType val_to = CastAs<ToType, FromType>{}(val_from);
+            ToType val_to = ToType(val_from);
             return data_type_for<ToType>()->decompose(val_to);
         });
     }
@@ -58,6 +58,23 @@ struct MakeCastAsFunction<sstring, FromType> {
     }
 };
 
+template<typename FromType>
+struct MakeCastAsFunction<big_decimal, FromType> {
+    shared_ptr<function> operator()() {
+        auto from_type = data_type_for<FromType>();
+        auto to_type = data_type_for<sstring>();
+        auto name = "castas" + to_type->as_cql3_type()->to_string();
+        return make_native_scalar_function<true>(name, to_type, { from_type },
+            [] (cql_serialization_format sf, const std::vector<bytes_opt>& parameters) -> opt_bytes {
+            auto&& val = parameters[0];
+            if (!val) {
+                return val;
+            }
+            return data_type_for<big_decimal>()->decompose(data_type_for<FromType>()->to_string(*val));
+        });
+    }
+};
+
 template<typename ToType, typename FromType>
 void declare_castas_function(castas_functions::Map &map) {
     map.emplace(castas_functions::Key{data_type_for<ToType>(), data_type_for<FromType>()},
@@ -68,14 +85,14 @@ template <typename FromType, typename ...ToTypes>
 struct FromToImpl;
 template <typename FromType>
 struct FromToImpl<FromType> {
-    static void decl(castas_functions::Map&) {
+    static void def(castas_functions::Map&) {
     }
 };
 template <typename FromType, typename ToType, typename ...ToTypes>
 struct FromToImpl<FromType, ToType, ToTypes...> {
-    static void decl(castas_functions::Map &map) {
+    static void def(castas_functions::Map &map) {
         declare_castas_function<ToType, FromType>(map);
-        FromToImpl<FromType, ToTypes...>::decl(map);
+        FromToImpl<FromType, ToTypes...>::def(map);
     }
 };
 
@@ -88,7 +105,10 @@ struct From {
 static castas_functions::Map
 init() {
     castas_functions::Map ret;
-    From<int>::To<float, double, sstring>::decl(ret);
+    From<int>::To<int, long, float, double, sstring>::def(ret);
+    From<long>::To<int, long, float, double, sstring>::def(ret);
+    From<float>::To<int, long, float, double, sstring>::def(ret);
+    From<double>::To<int, long, float, double, sstring>::def(ret);
     return ret;
 }
 

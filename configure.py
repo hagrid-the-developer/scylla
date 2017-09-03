@@ -242,6 +242,7 @@ scylla_tests = [
     'tests/streaming_histogram_test',
     'tests/duration_test',
     'tests/vint_serialization_test',
+    'tests/castas_fcts_test',
 ]
 
 apps = [
