@@ -56,34 +56,9 @@ namespace functions {
 
 class castas_functions {
 public:
-    class Key {
-        data_type _from;
-        data_type _to;
-    public:
-        Key(data_type from, data_type to)
-            : _from(std::move(from))
-            , _to(std::move(to)) { }
-
-        struct Hash {
-            auto operator()(const Key &key) const noexcept {
-                std::hash<data_type> h;
-                return h(key._from) ^ h(key._to);
-            }
-        };
-
-        struct Equal {
-            auto operator()(const Key &k1, const Key &k2) const noexcept {
-                return k1._from == k2._from && k1._to == k2._to;
-            }
-        };
-    };
-
-    // Map <ToType, FromType> -> Function
-    using Map = std::unordered_multimap<Key, shared_ptr<function>, Key::Hash, Key::Equal>;
-
     static shared_ptr<function> get(data_type to_type, const std::vector<shared_ptr<cql3::selection::selector>>& provided_args, schema_ptr s);
 private:
-    static thread_local Map _declared;
+    static thread_local castas_map _declared;
 };
 
 }

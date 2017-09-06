@@ -1184,6 +1184,29 @@ extern thread_local const shared_ptr<const abstract_type> counter_type;
 extern thread_local const shared_ptr<const abstract_type> duration_type;
 extern thread_local const data_type empty_type;
 
+struct byte_type_impl;
+struct short_type_impl;
+struct int32_type_impl;
+struct long_type_impl;
+struct ascii_type_impl;
+struct bytes_type_impl;
+struct utf8_type_impl;
+struct boolean_type_impl;
+struct date_type_impl;
+struct timeuuid_type_impl;
+struct timestamp_type_impl;
+struct simple_date_type_impl;
+struct time_type_impl;
+struct uuid_type_impl;
+struct inet_addr_type_impl;
+struct float_type_impl;
+struct double_type_impl;
+struct varint_type_impl;
+struct decimal_type_impl;
+struct counter_type_impl;
+struct duration_type_impl;
+struct empty_type_impl;
+
 template <>
 inline
 shared_ptr<const abstract_type> data_type_for<int8_t>() {
@@ -1254,6 +1277,18 @@ template <>
 inline
 shared_ptr<const abstract_type> data_type_for<double>() {
     return double_type;
+}
+
+template <>
+inline
+shared_ptr<const abstract_type> data_type_for<boost::multiprecision::cpp_int>() {
+    return varint_type;
+}
+
+template <>
+inline
+shared_ptr<const abstract_type> data_type_for<big_decimal>() {
+    return decimal_type;
 }
 
 namespace std {
@@ -1645,4 +1680,42 @@ struct appending_hash<data_type> {
     void operator()(Hasher& h, const data_type& v) const {
         feed_hash(h, v->name());
     }
+};
+
+/*
+ * Support for CAST(. AS .) functions.
+ */
+namespace cql3 {
+namespace functions {
+
+class function;
+
+}
+}
+
+class castas_map_key {
+    data_type _from;
+    data_type _to;
+public:
+    castas_map_key(data_type from, data_type to)
+        : _from(std::move(from))
+        , _to(std::move(to)) { }
+
+    struct equal {
+        auto operator()(const castas_map_key &k1, const castas_map_key &k2) const noexcept {
+            return k1._from == k2._from && k1._to == k2._to;
+        }
+    };
+    struct hash {
+        auto operator()(const castas_map_key &key) const noexcept {
+            std::hash<data_type> h;
+            return h(key._from) ^ h(key._to);
+        }
+    };
+};
+
+// Map <ToType, FromType> -> Function
+class castas_map : public std::unordered_multimap<castas_map_key, shared_ptr<cql3::functions::function>, castas_map_key::hash, castas_map_key::equal> {
+public:
+    castas_map();
 };
