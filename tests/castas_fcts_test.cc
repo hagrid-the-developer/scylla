@@ -152,7 +152,9 @@ SEASTAR_TEST_CASE(test_unsupported_conversions) {
 #endif
 
 SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
+    std::cerr << "XYZ: " << __LINE__ << std::endl;
     return do_with_cql_env_thread([&] (auto& e) {
+        std::cerr << "XYZ: " << __LINE__ << std::endl;
         e.execute_cql("CREATE TABLE test (a tinyint primary key,"
                       " b smallint,"
                       " c int,"
@@ -161,26 +163,182 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
                       " f double,"
                       " g decimal,"
                       " h varint,"
-                      " i int)");
+                      " i int)").get();
 
-        e.execute_cql("INSERT INTO test (a, b, c, d, e, f, g, h) VALUES (1, 2, 3, 4, 5.2, 6.3, 6.3, 4)");
-        auto msg = e.execute_cql("SELECT CAST(a AS tinyint), "
-                                 "CAST(b AS tinyint), "
-                                 "CAST(c AS tinyint), "
-                                 "CAST(d AS tinyint), "
-                                 "CAST(e AS tinyint), "
-                                 "CAST(f AS tinyint), "
-                                 "CAST(g AS tinyint), "
-                                 "CAST(h AS tinyint), "
-                                 "CAST(i AS tinyint) FROM test").get0();
-        assert_that(msg).is_rows().with_size(1).with_row({{byte_type->decompose(1)},
-                                                          {byte_type->decompose(2)},
-                                                          {byte_type->decompose(3)},
-                                                          {byte_type->decompose(4)},
-                                                          {byte_type->decompose(5)},
-                                                          {byte_type->decompose(6)},
-                                                          {byte_type->decompose(6)},
-                                                          {nullptr}});
+        std::cerr << "XYZ: " << __LINE__ << std::endl;
+        e.execute_cql("INSERT INTO test (a, b, c, d, e, f, g, h) VALUES (1, 2, 3, 4, 5.2, 6.3, 7.3, 8)").get();
+        std::cerr << "Running conversion..." << std::endl;
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS tinyint), "
+                                     "CAST(b AS tinyint), "
+                                     "CAST(c AS tinyint), "
+                                     "CAST(d AS tinyint), "
+                                     "CAST(e AS tinyint), "
+                                     "CAST(f AS tinyint), "
+                                     "CAST(g AS tinyint), "
+                                     "CAST(h AS tinyint), "
+                                     "CAST(i AS tinyint) FROM test").get0();
+            //std::cerr << "XYZ: [8]: " << (int)value_cast<int8_t>( byte_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[8].value()) ) << ";" << std::endl;
+            assert_that(msg).is_rows().with_size(1).with_row({{byte_type->decompose(int8_t(1))},
+                                                              {byte_type->decompose(int8_t(2))},
+                                                              {byte_type->decompose(int8_t(3))},
+                                                              {byte_type->decompose(int8_t(4))},
+                                                              {byte_type->decompose(int8_t(5))},
+                                                              {byte_type->decompose(int8_t(6))},
+                                                              {byte_type->decompose(int8_t(7))},
+                                                              {byte_type->decompose(int8_t(8))},
+                                                              {}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS smallint), "
+                                     "CAST(b AS smallint), "
+                                     "CAST(c AS smallint), "
+                                     "CAST(d AS smallint), "
+                                     "CAST(e AS smallint), "
+                                     "CAST(f AS smallint), "
+                                     "CAST(g AS smallint), "
+                                     "CAST(h AS smallint), "
+                                     "CAST(i AS smallint) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{short_type->decompose(int16_t(1))},
+                                                              {short_type->decompose(int16_t(2))},
+                                                              {short_type->decompose(int16_t(3))},
+                                                              {short_type->decompose(int16_t(4))},
+                                                              {short_type->decompose(int16_t(5))},
+                                                              {short_type->decompose(int16_t(6))},
+                                                              {short_type->decompose(int16_t(7))},
+                                                              {short_type->decompose(int16_t(8))},
+                                                              {}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS int), "
+                                     "CAST(b AS int), "
+                                     "CAST(c AS int), "
+                                     "CAST(d AS int), "
+                                     "CAST(e AS int), "
+                                     "CAST(f AS int), "
+                                     "CAST(g AS int), "
+                                     "CAST(h AS int), "
+                                     "CAST(i AS int) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{int32_type->decompose(int32_t(1))},
+                                                              {int32_type->decompose(int32_t(2))},
+                                                              {int32_type->decompose(int32_t(3))},
+                                                              {int32_type->decompose(int32_t(4))},
+                                                              {int32_type->decompose(int32_t(5))},
+                                                              {int32_type->decompose(int32_t(6))},
+                                                              {int32_type->decompose(int32_t(7))},
+                                                              {int32_type->decompose(int32_t(8))},
+                                                              {}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS bigint), "
+                                     "CAST(b AS bigint), "
+                                     "CAST(c AS bigint), "
+                                     "CAST(d AS bigint), "
+                                     "CAST(e AS bigint), "
+                                     "CAST(f AS bigint), "
+                                     "CAST(g AS bigint), "
+                                     "CAST(h AS bigint), "
+                                     "CAST(i AS bigint) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{long_type->decompose(int64_t(1))},
+                                                              {long_type->decompose(int64_t(2))},
+                                                              {long_type->decompose(int64_t(3))},
+                                                              {long_type->decompose(int64_t(4))},
+                                                              {long_type->decompose(int64_t(5))},
+                                                              {long_type->decompose(int64_t(6))},
+                                                              {long_type->decompose(int64_t(7))},
+                                                              {long_type->decompose(int64_t(8))},
+                                                              {}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS float), "
+                                     "CAST(b AS float), "
+                                     "CAST(c AS float), "
+                                     "CAST(d AS float), "
+                                     "CAST(e AS float), "
+                                     "CAST(f AS float), "
+                                     "CAST(g AS float), "
+                                     "CAST(h AS float), "
+                                     "CAST(i AS float) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{float_type->decompose(float(1))},
+                                                              {float_type->decompose(float(2))},
+                                                              {float_type->decompose(float(3))},
+                                                              {float_type->decompose(float(4))},
+                                                              {float_type->decompose(float(5.2))},
+                                                              {float_type->decompose(float(6.3))},
+                                                              {float_type->decompose(float(7.3))},
+                                                              {float_type->decompose(float(8))},
+                                                              {}});
+        }
+        /*
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS double), "
+                                     "CAST(b AS double), "
+                                     "CAST(c AS double), "
+                                     "CAST(d AS double), "
+                                     "CAST(e AS double), "
+                                     "CAST(f AS double), "
+                                     "CAST(g AS double), "
+                                     "CAST(h AS double), "
+                                     "CAST(i AS double) FROM test").get0();
+                    std::cerr << "XYZ: [0]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[0].value()) ) << ";" << std::endl;
+                    std::cerr << "XYZ: [1]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[1].value()) ) << ";" << std::endl;
+                    std::cerr << "XYZ: [2]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[2].value()) ) << ";" << std::endl;
+                    std::cerr << "XYZ: [3]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[3].value()) ) << ";" << std::endl;
+                    std::cerr << "XYZ: [4]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[4].value()) ) << ";" << std::endl;
+                    std::cerr << "XYZ: [5]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[5].value()) ) << ";" << std::endl;
+                    std::cerr << "XYZ: [6]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[6].value()) ) << ";" << std::endl;
+                    std::cerr << "XYZ: [7]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[7].value()) ) << ";" << std::endl;
+            assert_that(msg).is_rows().with_size(1).with_row({{double_type->decompose(double(1))},
+                                                              {double_type->decompose(double(2))},
+                                                              {double_type->decompose(double(3))},
+                                                              {double_type->decompose(double(4))},
+                                                              {double_type->decompose(double(5.2))},
+                                                              {double_type->decompose(double(6.3))},
+                                                              {double_type->decompose(double(7.3))},
+                                                              {double_type->decompose(double(8))},
+                                                              {}});
+        }
+        */
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS ascii), "
+                                     "CAST(b AS ascii), "
+                                     "CAST(c AS ascii), "
+                                     "CAST(d AS ascii), "
+                                     "CAST(e AS ascii), "
+                                     "CAST(f AS ascii), "
+                                     "CAST(g AS ascii), "
+                                     "CAST(h AS ascii), "
+                                     "CAST(i AS ascii) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{ascii_type->decompose("1")},
+                                                              {ascii_type->decompose("2")},
+                                                              {ascii_type->decompose("3")},
+                                                              {ascii_type->decompose("4")},
+                                                              {ascii_type->decompose("5.2")},
+                                                              {ascii_type->decompose("6.3")},
+                                                              {ascii_type->decompose("7.3")},
+                                                              {ascii_type->decompose("8")},
+                                                              {}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS text), "
+                                     "CAST(b AS text), "
+                                     "CAST(c AS text), "
+                                     "CAST(d AS text), "
+                                     "CAST(e AS text), "
+                                     "CAST(f AS text), "
+                                     "CAST(g AS text), "
+                                     "CAST(h AS text), "
+                                     "CAST(i AS text) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{utf8_type->decompose("1")},
+                                                              {utf8_type->decompose("2")},
+                                                              {utf8_type->decompose("3")},
+                                                              {utf8_type->decompose("4")},
+                                                              {utf8_type->decompose("5.2")},
+                                                              {utf8_type->decompose("6.3")},
+                                                              {utf8_type->decompose("7.3")},
+                                                              {utf8_type->decompose("8")},
+                                                              {}});
+        }
     });
 }
 
@@ -189,61 +347,6 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
                           "cast(b as int)",
                           "c",
                           "cast(d as double)");
-
-        assertRows(execute("SELECT CAST(a AS smallint), " +
-                "CAST(b AS smallint), " +
-                "CAST(c AS smallint), " +
-                "CAST(d AS smallint), " +
-                "CAST(e AS smallint), " +
-                "CAST(f AS smallint), " +
-                "CAST(g AS smallint), " +
-                "CAST(h AS smallint), " +
-                "CAST(i AS smallint) FROM %s"),
-                   row((short) 1, (short) 2, (short) 3, (short) 4L, (short) 5, (short) 6, (short) 6, (short) 4, null));
-
-        assertRows(execute("SELECT CAST(a AS int), " +
-                "CAST(b AS int), " +
-                "CAST(c AS int), " +
-                "CAST(d AS int), " +
-                "CAST(e AS int), " +
-                "CAST(f AS int), " +
-                "CAST(g AS int), " +
-                "CAST(h AS int), " +
-                "CAST(i AS int) FROM %s"),
-                   row(1, 2, 3, 4, 5, 6, 6, 4, null));
-
-        assertRows(execute("SELECT CAST(a AS bigint), " +
-                "CAST(b AS bigint), " +
-                "CAST(c AS bigint), " +
-                "CAST(d AS bigint), " +
-                "CAST(e AS bigint), " +
-                "CAST(f AS bigint), " +
-                "CAST(g AS bigint), " +
-                "CAST(h AS bigint), " +
-                "CAST(i AS bigint) FROM %s"),
-                   row(1L, 2L, 3L, 4L, 5L, 6L, 6L, 4L, null));
-
-        assertRows(execute("SELECT CAST(a AS float), " +
-                "CAST(b AS float), " +
-                "CAST(c AS float), " +
-                "CAST(d AS float), " +
-                "CAST(e AS float), " +
-                "CAST(f AS float), " +
-                "CAST(g AS float), " +
-                "CAST(h AS float), " +
-                "CAST(i AS float) FROM %s"),
-                   row(1.0F, 2.0F, 3.0F, 4.0F, 5.2F, 6.3F, 6.3F, 4.0F, null));
-
-        assertRows(execute("SELECT CAST(a AS double), " +
-                "CAST(b AS double), " +
-                "CAST(c AS double), " +
-                "CAST(d AS double), " +
-                "CAST(e AS double), " +
-                "CAST(f AS double), " +
-                "CAST(g AS double), " +
-                "CAST(h AS double), " +
-                "CAST(i AS double) FROM %s"),
-                   row(1.0, 2.0, 3.0, 4.0, (double) 5.2F, 6.3, 6.3, 4.0, null));
 
         assertRows(execute("SELECT CAST(a AS decimal), " +
                 "CAST(b AS decimal), " +
@@ -264,43 +367,6 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
                        BigDecimal.valueOf(4.0),
                        null));
 
-        assertRows(execute("SELECT CAST(a AS ascii), " +
-                "CAST(b AS ascii), " +
-                "CAST(c AS ascii), " +
-                "CAST(d AS ascii), " +
-                "CAST(e AS ascii), " +
-                "CAST(f AS ascii), " +
-                "CAST(g AS ascii), " +
-                "CAST(h AS ascii), " +
-                "CAST(i AS ascii) FROM %s"),
-                   row("1",
-                       "2",
-                       "3",
-                       "4",
-                       "5.2",
-                       "6.3",
-                       "6.3",
-                       "4",
-                       null));
-
-        assertRows(execute("SELECT CAST(a AS text), " +
-                "CAST(b AS text), " +
-                "CAST(c AS text), " +
-                "CAST(d AS text), " +
-                "CAST(e AS text), " +
-                "CAST(f AS text), " +
-                "CAST(g AS text), " +
-                "CAST(h AS text), " +
-                "CAST(i AS text) FROM %s"),
-                   row("1",
-                       "2",
-                       "3",
-                       "4",
-                       "5.2",
-                       "6.3",
-                       "6.3",
-                       "4",
-                       null));
 #endif
 
 #if 0

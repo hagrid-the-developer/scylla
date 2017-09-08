@@ -3442,6 +3442,7 @@ shared_ptr<cql3::functions::function> make_castas_function_to_ascii(const concre
     auto from_type = data_type_for<FromType>();
     auto to_type = ascii_type;
     auto name = "castas" + to_type->as_cql3_type()->to_string();
+    std::cerr << "XYZ: name: " << name << "; from-type: " << from_type->name() << "; to-type:" << to_type->name() << std::endl;
     return cql3::functions::make_native_scalar_function<true>(name, to_type, { from_type },
                                              [] (cql_serialization_format sf, const std::vector<bytes_opt>& parameters) -> opt_bytes {
         auto&& val = parameters[0];
@@ -3496,7 +3497,12 @@ shared_ptr<cql3::functions::function> make_castas_function_from_decimal(const si
         }
         // FIXME: Quic & Dirty Conversion
         big_decimal val_from = value_cast<big_decimal>(decimal_type->deserialize(*val));
-        return data_type_for<ToType>->decompose(static_cast<ToType>(val_from.unscaled_value())/val_from.scale());
+        std::cerr << "XYZ: unscaled_value:" << val_from.unscaled_value() << "/" << val_from.scale() << std::endl;
+        double double_val = static_cast<double>(val_from.unscaled_value());
+        int divisor = 1;
+        for (auto scale = val_from.scale(); scale--;)
+            divisor *= 10;
+        return data_type_for<ToType>()->decompose(static_cast<ToType>(double_val/divisor));
     });
 }
 
@@ -3514,6 +3520,22 @@ shared_ptr<cql3::functions::function> make_castas_function_from_varint(const sim
         boost::multiprecision::cpp_int val_from = value_cast<boost::multiprecision::cpp_int>(varint_type->deserialize(*val));
         return data_type_for<ToType>()->decompose(static_cast<ToType>(val_from));
     });
+}
+
+/*
+template <typename T>
+auto get_data_type(const T&) -> decltype(data_type_for<T>()) {
+    return data_type_for<T>();
+}
+*/
+
+template <typename T>
+shared_ptr<const abstract_type> get_data_type(const concrete_type<T>&) {
+    return data_type_for<T>();
+}
+
+shared_ptr<const abstract_type> get_data_type(const ascii_type_impl&) {
+    return ascii_type;
 }
 
 template<typename ToType, typename FromType>
@@ -3573,13 +3595,8 @@ struct FromToImpl<FromTypeImpl> {
 };
 template <typename FromTypeImpl, typename ToTypeImpl, typename ...ToTypesImpl>
 struct FromToImpl<FromTypeImpl, ToTypeImpl, ToTypesImpl...> {
-    template <typename ToType, typename FromType>
-    static castas_map_key key(const concrete_type<ToType>&, const concrete_type<FromType>&) {
-        return castas_map_key{data_type_for<ToType>(), data_type_for<FromType>()};
-    }
-
     static void def(castas_map &map) {
-        map.emplace(key(ToTypeImpl(), FromTypeImpl()), make_castas_function(ToTypeImpl(), FromTypeImpl()));
+        map.emplace(castas_map_key{get_data_type(ToTypeImpl()), get_data_type(FromTypeImpl())}, make_castas_function(ToTypeImpl(), FromTypeImpl()));
         FromToImpl<FromTypeImpl, ToTypesImpl...>::def(map);
     }
 };
@@ -3599,6 +3616,8 @@ castas_map::castas_map() {
     From<long_type_impl>::To<byte_type_impl, short_type_impl, int32_type_impl, long_type_impl, float_type_impl, double_type_impl, utf8_type_impl, ascii_type_impl, varint_type_impl, decimal_type_impl>::def(*this);
     From<float_type_impl>::To<byte_type_impl, short_type_impl, int32_type_impl, long_type_impl, float_type_impl, double_type_impl, utf8_type_impl, ascii_type_impl, varint_type_impl, decimal_type_impl>::def(*this);
     From<double_type_impl>::To<byte_type_impl, short_type_impl, int32_type_impl, long_type_impl, float_type_impl, double_type_impl, utf8_type_impl, ascii_type_impl, varint_type_impl, decimal_type_impl>::def(*this);
+    From<varint_type_impl>::To<byte_type_impl, short_type_impl, int32_type_impl, long_type_impl, float_type_impl, double_type_impl, utf8_type_impl, ascii_type_impl/*, varint_type_impl, decimal_type_impl*/>::def(*this);
+    From<decimal_type_impl>::To<byte_type_impl, short_type_impl, int32_type_impl, long_type_impl, float_type_impl, double_type_impl, utf8_type_impl, ascii_type_impl/*, varint_type_impl, decimal_type_impl*/>::def(*this);
     From<ascii_type_impl>::To<ascii_type_impl, utf8_type_impl>::def(*this);
     From<utf8_type_impl>::To<utf8_type_impl>::def(*this);
 }

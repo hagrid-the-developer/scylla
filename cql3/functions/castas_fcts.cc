@@ -10,7 +10,7 @@ shared_ptr<function> castas_functions::get(data_type to_type, const std::vector<
     if (provided_args.size() != 1)
         throw exceptions::invalid_request_exception("Invalid CAST expression");
     auto from_type = provided_args[0]->get_type();
-    std::cerr << "XYZ: ToType:" << to_type->name() << "from-type:" << from_type->name() << std::endl;
+    std::cerr << "XYZ: ToType:" << to_type->name() << "; from-type:" << from_type->name() << std::endl;
 
     auto it_candidate = _declared.find(castas_map_key{to_type, from_type});
     if (it_candidate == _declared.end())
