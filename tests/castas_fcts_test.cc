@@ -269,7 +269,6 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
                                                               {float_type->decompose(float(8))},
                                                               {}});
         }
-        /*
         {
             auto msg = e.execute_cql("SELECT CAST(a AS double), "
                                      "CAST(b AS double), "
@@ -280,25 +279,30 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
                                      "CAST(g AS double), "
                                      "CAST(h AS double), "
                                      "CAST(i AS double) FROM test").get0();
-                    std::cerr << "XYZ: [0]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[0].value()) ) << ";" << std::endl;
-                    std::cerr << "XYZ: [1]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[1].value()) ) << ";" << std::endl;
-                    std::cerr << "XYZ: [2]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[2].value()) ) << ";" << std::endl;
-                    std::cerr << "XYZ: [3]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[3].value()) ) << ";" << std::endl;
-                    std::cerr << "XYZ: [4]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[4].value()) ) << ";" << std::endl;
-                    std::cerr << "XYZ: [5]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[5].value()) ) << ";" << std::endl;
-                    std::cerr << "XYZ: [6]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[6].value()) ) << ";" << std::endl;
-                    std::cerr << "XYZ: [7]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[7].value()) ) << ";" << std::endl;
-            assert_that(msg).is_rows().with_size(1).with_row({{double_type->decompose(double(1))},
-                                                              {double_type->decompose(double(2))},
-                                                              {double_type->decompose(double(3))},
-                                                              {double_type->decompose(double(4))},
-                                                              {double_type->decompose(double(5.2))},
-                                                              {double_type->decompose(double(6.3))},
-                                                              {double_type->decompose(double(7.3))},
-                                                              {double_type->decompose(double(8))},
-                                                              {}});
+            // Conversions to double cannot be compared with assert_that(), because result
+            //   of double conversions may be slightly different from theoretical values.
+            auto cmp = [&](::size_t index, double req) {
+                auto row = dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front();
+                auto val = value_cast<double>( double_type->deserialize(row[index].value()) );
+                BOOST_CHECK_CLOSE(val, req, 1e-4);
+            };
+            auto cmp_null = [&](::size_t index) {
+                auto row = dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front();
+                BOOST_CHECK(!row[index]);
+            };
+            cmp(0, 1.d);
+            cmp(1, 2.d);
+            cmp(2, 3.d);
+            cmp(3, 4.d);
+            cmp(4, 5.2d);
+            cmp(5, 6.3d);
+            cmp(6, 7.3d);
+            cmp(7, 8.d);
+            cmp_null(8);
+            /*
+               std::cerr << "XYZ: [0]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[0].value()) ) << ";" << std::endl;
+             */
         }
-        */
         {
             auto msg = e.execute_cql("SELECT CAST(a AS ascii), "
                                      "CAST(b AS ascii), "
