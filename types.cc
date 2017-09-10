@@ -3388,13 +3388,6 @@ namespace {
 
 using opt_bytes = std::experimental::optional<bytes>;
 
-/*
-template <typename T>
-auto get_data_type(const T&) -> decltype(data_type_for<T>()) {
-    return data_type_for<T>();
-}
-*/
-
 template <typename T>
 shared_ptr<const abstract_type> get_data_type(const concrete_type<T>&) {
     return data_type_for<T>();
@@ -3403,10 +3396,6 @@ shared_ptr<const abstract_type> get_data_type(const concrete_type<T>&) {
 shared_ptr<const abstract_type> get_data_type(const ascii_type_impl&) {
     return ascii_type;
 }
-
-template<typename ToType, typename FromType>
-struct castas_simple_cast {
-};
 
 template<typename ToType, typename FromType>
 shared_ptr<cql3::functions::function> make_castas_function_simple(const concrete_type<ToType> &to, const concrete_type<FromType> &from) {
@@ -3438,8 +3427,8 @@ shared_ptr<cql3::functions::function> make_castas_function_trivial(const concret
     });
 }
 
-template<typename ToType, typename FromType>
-shared_ptr<cql3::functions::function> make_castas_function_to_str(const ToType &to, const FromType &from) {
+template<typename ToTypeImpl, typename FromTypeImpl>
+shared_ptr<cql3::functions::function> make_castas_function_to_str(const ToTypeImpl &to, const FromTypeImpl &from) {
     auto from_type = get_data_type(from);
     auto to_type = get_data_type(to);
     auto name = "castas" + to_type->as_cql3_type()->to_string();
@@ -3479,14 +3468,12 @@ shared_ptr<cql3::functions::function> make_castas_function_from_decimal(const si
         if (!val) {
             return val;
         }
-        // FIXME: Quic & Dirty Conversion
+
         big_decimal val_from = value_cast<big_decimal>(decimal_type->deserialize(*val));
-        std::cerr << "XYZ: unscaled_value:" << val_from.unscaled_value() << "/" << val_from.scale() << std::endl;
-        double double_val = static_cast<double>(val_from.unscaled_value());
-        int divisor = 1;
-        for (auto scale = val_from.scale(); scale--;)
-            divisor *= 10;
-        return data_type_for<ToType>()->decompose(static_cast<ToType>(double_val/divisor));
+        boost::multiprecision::cpp_int ten(10);
+        boost::multiprecision::cpp_rational r = val_from.unscaled_value();
+        r /= boost::multiprecision::pow(ten, val_from.scale());
+        return data_type_for<ToType>()->decompose(static_cast<ToType>(r));
     });
 }
 
