@@ -3326,7 +3326,7 @@ data_value::data_value(double v) : data_value(make_new(double_type, v)) {
 data_value::data_value(net::ipv4_address v) : data_value(make_new(inet_addr_type, v)) {
 }
 
-data_value::data_value(db_clock::time_point v) : data_value(make_new(date_type, v)) {
+data_value::data_value(db_clock::time_point v) : data_value(make_new(timestamp_type, v)) {
 }
 
 data_value::data_value(boost::multiprecision::cpp_int v) : data_value(make_new(varint_type, v)) {
@@ -3415,7 +3415,7 @@ shared_ptr<cql3::functions::function> make_castas_function_f(const ToTypeImpl &t
             return val;
         }
 
-        auto val_from = value_cast<FromType>(decimal_type->deserialize(*val));
+        auto val_from = value_cast<FromType>(from_type->deserialize(*val));
         ToType val_to = f(val_from);
         return to_type->decompose(val_to);
     });
@@ -3544,6 +3544,7 @@ template<typename FromTypeImpl>
 std::enable_if_t<!std::is_same<FromTypeImpl, ascii_type_impl>::value, shared_ptr<cql3::functions::function>> make_castas_function(const ascii_type_impl &to, const FromTypeImpl &from) {
     return make_castas_function_to_str<>(to, from);
 }
+/*
 shared_ptr<cql3::functions::function> make_castas_function(const date_type_impl &to, const timestamp_type_impl &from) {
     return make_castas_function_to_compatible<>(to, from, to);
 }
@@ -3551,13 +3552,13 @@ shared_ptr<cql3::functions::function> make_castas_function(const date_type_impl 
 shared_ptr<cql3::functions::function> make_castas_function(const timestamp_type_impl &to, const date_type_impl &from) {
     return make_castas_function_to_compatible<>(to, from, to);
 }
-/*
+*/
 shared_ptr<cql3::functions::function> make_castas_function(const timestamp_type_impl &to, const simple_date_type_impl &from) {
     return make_castas_function_f(to, from, [](auto val_from) {
+        std::cerr << "XYZ: val_from:" << val_from << "; val_to:" << db_clock::from_time_t(val_from) << std::endl;
         return db_clock::from_time_t(val_from);
     });
 }
-*/
 /*
 shared_ptr<cql3::functions::function> make_castas_function(const simple_date_type_impl &to, const timestamp_type_impl &from) {
     return make_castas_function_f(to, from, [](auto val_from) {
@@ -3600,5 +3601,5 @@ castas_map::castas_map() {
     From<ascii_type_impl>::To<ascii_type_impl, utf8_type_impl>::def(*this);
     From<utf8_type_impl>::To<utf8_type_impl>::def(*this);
     From<timestamp_type_impl>::To<timestamp_type_impl/*, simple_date_type_impl*/, ascii_type_impl, utf8_type_impl>::def(*this);
-    From<simple_date_type_impl>::To</*timestamp_type_impl,*/ simple_date_type_impl, ascii_type_impl, utf8_type_impl>::def(*this);
+    From<simple_date_type_impl>::To<timestamp_type_impl, simple_date_type_impl, ascii_type_impl, utf8_type_impl>::def(*this);
 }
