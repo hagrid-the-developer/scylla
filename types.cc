@@ -3326,6 +3326,9 @@ data_value::data_value(double v) : data_value(make_new(double_type, v)) {
 data_value::data_value(net::ipv4_address v) : data_value(make_new(inet_addr_type, v)) {
 }
 
+data_value::data_value(uint32_t v) : data_value(make_new(simple_date_type, v)) {
+}
+
 data_value::data_value(db_clock::time_point v) : data_value(make_new(timestamp_type, v)) {
 }
 
@@ -3555,17 +3558,18 @@ shared_ptr<cql3::functions::function> make_castas_function(const timestamp_type_
 */
 shared_ptr<cql3::functions::function> make_castas_function(const timestamp_type_impl &to, const simple_date_type_impl &from) {
     return make_castas_function_f(to, from, [](auto val_from) {
-        std::cerr << "XYZ: val_from:" << val_from << "; val_to:" << db_clock::from_time_t(val_from) << std::endl;
-        return db_clock::from_time_t(val_from);
+        const auto epoch = boost::posix_time::from_time_t(0);
+        const auto target_date = epoch + boost::gregorian::days(int64_t(val_from) - (1UL<<31));
+        boost::posix_time::time_duration duration = target_date - epoch;
+        return db_clock::from_time_t(duration.total_seconds());
     });
 }
-/*
 shared_ptr<cql3::functions::function> make_castas_function(const simple_date_type_impl &to, const timestamp_type_impl &from) {
-    return make_castas_function_f(to, from, [](auto val_from) {
-        return db_clock::to_time_t(val_from);
+    return make_castas_function_f(to, from, [](db_clock::time_point val_from) {
+        return uint32_t(std::chrono::duration_cast<std::chrono::hours>(val_from.time_since_epoch()/24).count());
     });
 }
-*/
+
 template <typename FromTypeImpl, typename ...ToTypesImpl>
 struct FromToImpl;
 template <typename FromTypeImpl>
@@ -3600,6 +3604,6 @@ castas_map::castas_map() {
     From<decimal_type_impl>::To<byte_type_impl, short_type_impl, int32_type_impl, long_type_impl, float_type_impl, double_type_impl, utf8_type_impl, ascii_type_impl/*, varint_type_impl, decimal_type_impl*/>::def(*this);
     From<ascii_type_impl>::To<ascii_type_impl, utf8_type_impl>::def(*this);
     From<utf8_type_impl>::To<utf8_type_impl>::def(*this);
-    From<timestamp_type_impl>::To<timestamp_type_impl/*, simple_date_type_impl*/, ascii_type_impl, utf8_type_impl>::def(*this);
+    From<timestamp_type_impl>::To<timestamp_type_impl, simple_date_type_impl, ascii_type_impl, utf8_type_impl>::def(*this);
     From<simple_date_type_impl>::To<timestamp_type_impl, simple_date_type_impl, ascii_type_impl, utf8_type_impl>::def(*this);
 }
