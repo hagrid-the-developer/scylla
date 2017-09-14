@@ -41,6 +41,7 @@
 
 #pragma once
 
+#include <boost/functional/hash.hpp>
 #include <tuple>
 #include <unordered_map>
 
@@ -56,9 +57,19 @@ namespace functions {
 
 class castas_functions {
 public:
+    // Map <ToType, FromType> -> Function
+    using castas_fcts_key = std::tuple<data_type, data_type>;
+    struct castas_fcts_hash {
+        std::size_t operator()(const castas_fcts_key &x) const noexcept {
+            return boost::hash_value(x);
+        }
+    };
+    using castas_fcts_map = std::unordered_map<castas_fcts_key, shared_ptr<cql3::functions::function>, castas_fcts_hash>;
     static shared_ptr<function> get(data_type to_type, const std::vector<shared_ptr<cql3::selection::selector>>& provided_args, schema_ptr s);
+
 private:
-    static thread_local castas_map _declared;
+    static thread_local castas_fcts_map _declared;
+    static castas_fcts_map init();
 };
 
 }

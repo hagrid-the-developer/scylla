@@ -1679,37 +1679,6 @@ struct appending_hash<data_type> {
 /*
  * Support for CAST(. AS .) functions.
  */
-namespace cql3 {
-namespace functions {
 
-class function;
-
-}
-}
-
-class castas_map_key {
-    data_type _from;
-    data_type _to;
-public:
-    castas_map_key(data_type from, data_type to)
-        : _from(std::move(from))
-        , _to(std::move(to)) { }
-
-    struct equal {
-        auto operator()(const castas_map_key &k1, const castas_map_key &k2) const noexcept {
-            return k1._from == k2._from && k1._to == k2._to;
-        }
-    };
-    struct hash {
-        auto operator()(const castas_map_key &key) const noexcept {
-            std::hash<data_type> h;
-            return h(key._from) ^ h(key._to);
-        }
-    };
-};
-
-// Map <ToType, FromType> -> Function
-class castas_map : public std::unordered_multimap<castas_map_key, shared_ptr<cql3::functions::function>, castas_map_key::hash, castas_map_key::equal> {
-public:
-    castas_map();
-};
+using castas_fctn = std::function<data_value(data_value)>;
+extern thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_fctns;
