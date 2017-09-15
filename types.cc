@@ -3436,6 +3436,27 @@ std::function<data_value(data_value)> make_castas_fctn_from_decimal_to_string() 
     };
 }
 
+std::function<data_value(data_value)> make_castas_fctn_from_timestamp_to_date() {
+    return [](data_value from) -> data_value {
+        const auto val_from = value_cast<db_clock::time_point>(from);
+        const auto epoch = boost::posix_time::from_time_t(0);
+        auto timestamp = val_from.time_since_epoch().count();
+        auto time = boost::posix_time::from_time_t(0) + boost::posix_time::milliseconds(timestamp);
+        const auto diff = time.date() - epoch.date();
+        return uint32_t(diff.days() + (1UL<<31));
+    };
+}
+
+std::function<data_value(data_value)> make_castas_fctn_from_date_to_timestamp() {
+    return [](data_value from) -> data_value {
+        const auto val_from = value_cast<uint32_t>(from);
+        const auto epoch = boost::posix_time::from_time_t(0);
+        // XYZ: Signed from unsigned, what is the result?
+        const auto target_date = epoch + boost::gregorian::days(int64_t(val_from) - (1UL<<31));
+        boost::posix_time::time_duration duration = target_date - epoch;
+        return db_clock::from_time_t(duration.total_seconds());
+    };
+}
 
 } /* Anonymous Namespace */
 
@@ -3521,6 +3542,9 @@ thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_f
     { utf8_type, double_type, make_castas_fctn_to_string<double>() },
     { utf8_type, varint_type, make_castas_fctn_from_varint_to_string() },
     { utf8_type, decimal_type, make_castas_fctn_from_decimal_to_string() },
+
+    { timestamp_type, simple_date_type, make_castas_fctn_from_date_to_timestamp() },
+    { simple_date_type, timestamp_type, make_castas_fctn_from_timestamp_to_date() },
 };
 
 // FIXME: Remove me and everything bellow.
