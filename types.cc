@@ -3454,7 +3454,8 @@ std::function<data_value(data_value)> make_castas_fctn_from_date_to_timestamp() 
         // XYZ: Signed from unsigned, what is the result?
         const auto target_date = epoch + boost::gregorian::days(int64_t(val_from) - (1UL<<31));
         boost::posix_time::time_duration duration = target_date - epoch;
-        return db_clock::from_time_t(duration.total_seconds());
+        const auto millis = std::chrono::milliseconds(duration.total_milliseconds());
+        return db_clock::time_point(std::chrono::duration_cast<db_clock::duration>(millis));
     };
 }
 
