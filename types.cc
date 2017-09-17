@@ -3322,6 +3322,9 @@ data_value::data_value(double v) : data_value(make_new(double_type, v)) {
 data_value::data_value(net::ipv4_address v) : data_value(make_new(inet_addr_type, v)) {
 }
 
+data_value::data_value(uint32_t v) : data_value(make_new(simple_date_type, v)) {
+}
+
 data_value::data_value(db_clock::time_point v) : data_value(make_new(date_type, v)) {
 }
 
@@ -3377,3 +3380,195 @@ std::ostream& operator<<(std::ostream& out, const data_value& v) {
     v.serialize(i);
     return out << v.type()->to_string(b);
 }
+
+/*
+ * Support for CAST(. AS .) functions.
+ */
+namespace {
+
+using opt_bytes = std::experimental::optional<bytes>;
+
+template<typename ToType, typename FromType>
+std::function<data_value(data_value)> make_castas_fctn_simple() {
+    return [](data_value from) -> data_value {
+        auto val_from = value_cast<FromType>(from);
+        return static_cast<ToType>(val_from);
+    };
+}
+
+template<typename ToType>
+std::function<data_value(data_value)> make_castas_fctn_from_decimal_to_float() {
+    return [](data_value from) -> data_value {
+        auto val_from = value_cast<big_decimal>(from);
+        boost::multiprecision::cpp_int ten(10);
+        boost::multiprecision::cpp_rational r = val_from.unscaled_value();
+        r /= boost::multiprecision::pow(ten, val_from.scale());
+        return static_cast<ToType>(r);
+    };
+}
+
+template<typename ToType>
+std::function<data_value(data_value)> make_castas_fctn_from_decimal_to_integer() {
+    return [](data_value from) -> data_value {
+        auto val_from = value_cast<big_decimal>(from);
+        boost::multiprecision::cpp_int ten(10);
+        return static_cast<ToType>(val_from.unscaled_value() / boost::multiprecision::pow(ten, val_from.scale()));
+    };
+}
+template<typename FromType>
+std::function<data_value(data_value)> make_castas_fctn_to_string() {
+    return [](data_value from) -> data_value {
+        return to_sstring(value_cast<FromType>(from));
+    };
+}
+std::function<data_value(data_value)> make_castas_fctn_from_varint_to_string() {
+    return [](data_value from) -> data_value {
+        return to_sstring(value_cast<boost::multiprecision::cpp_int>(from).str());
+    };
+}
+std::function<data_value(data_value)> make_castas_fctn_from_decimal_to_string() {
+    return [](data_value from) -> data_value {
+        return value_cast<big_decimal>(from).to_string();
+    };
+}
+
+db_clock::time_point millis_to_time_point(const int64_t millis) {
+    return db_clock::time_point{std::chrono::milliseconds(millis)};
+}
+
+uint32_t time_point_to_date(const db_clock::time_point &tp) {
+    const auto epoch = boost::posix_time::from_time_t(0);
+    auto timestamp = tp.time_since_epoch().count();
+    auto time = boost::posix_time::from_time_t(0) + boost::posix_time::milliseconds(timestamp);
+    const auto diff = time.date() - epoch.date();
+    return uint32_t(diff.days() + (1UL<<31));
+}
+
+db_clock::time_point date_to_time_point(const uint32_t date) {
+    const auto epoch = boost::posix_time::from_time_t(0);
+    // XYZ: Signed from unsigned, what is the result?
+    const auto target_date = epoch + boost::gregorian::days(int64_t(date) - (1UL<<31));
+    boost::posix_time::time_duration duration = target_date - epoch;
+    const auto millis = std::chrono::milliseconds(duration.total_milliseconds());
+    return db_clock::time_point(std::chrono::duration_cast<db_clock::duration>(millis));
+}
+
+std::function<data_value(data_value)> make_castas_fctn_from_timestamp_to_date() {
+    return [](data_value from) -> data_value {
+        const auto val_from = value_cast<db_clock::time_point>(from);
+        return time_point_to_date(val_from);
+    };
+}
+
+std::function<data_value(data_value)> make_castas_fctn_from_date_to_timestamp() {
+    return [](data_value from) -> data_value {
+        const auto val_from = value_cast<uint32_t>(from);
+        return date_to_time_point(val_from);
+    };
+}
+
+std::function<data_value(data_value)> make_castas_fctn_from_timeuuid_to_timestamp() {
+    return [](data_value from) -> data_value {
+        const auto val_from = value_cast<utils::UUID>(from);
+        return millis_to_time_point(val_from.timestamp());
+    };
+}
+
+std::function<data_value(data_value)> make_castas_fctn_from_timeuuid_to_date() {
+    return [](data_value from) -> data_value {
+        const auto val_from = value_cast<utils::UUID>(from);
+        return time_point_to_date(millis_to_time_point(val_from.timestamp()));
+    };
+}
+
+} /* Anonymous Namespace */
+
+// Table of castas functions...
+thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_fctns = {
+    { byte_type, byte_type, make_castas_fctn_simple<int8_t, int8_t>() },
+    { byte_type, short_type, make_castas_fctn_simple<int8_t, int16_t>() },
+    { byte_type, int32_type, make_castas_fctn_simple<int8_t, int32_t>() },
+    { byte_type, long_type, make_castas_fctn_simple<int8_t, int64_t>() },
+    { byte_type, float_type, make_castas_fctn_simple<int8_t, float>() },
+    { byte_type, double_type, make_castas_fctn_simple<int8_t, double>() },
+    { byte_type, varint_type, make_castas_fctn_simple<int8_t, boost::multiprecision::cpp_int>() },
+    { byte_type, decimal_type, make_castas_fctn_from_decimal_to_float<int8_t>() },
+
+    { short_type, byte_type, make_castas_fctn_simple<int16_t, int8_t>() },
+    { short_type, short_type, make_castas_fctn_simple<int16_t, int16_t>() },
+    { short_type, int32_type, make_castas_fctn_simple<int16_t, int32_t>() },
+    { short_type, long_type, make_castas_fctn_simple<int16_t, int64_t>() },
+    { short_type, float_type, make_castas_fctn_simple<int16_t, float>() },
+    { short_type, double_type, make_castas_fctn_simple<int16_t, double>() },
+    { short_type, varint_type, make_castas_fctn_simple<int16_t, boost::multiprecision::cpp_int>() },
+    { short_type, decimal_type, make_castas_fctn_from_decimal_to_float<int16_t>() },
+
+    { int32_type, byte_type, make_castas_fctn_simple<int32_t, int8_t>() },
+    { int32_type, short_type, make_castas_fctn_simple<int32_t, int16_t>() },
+    { int32_type, int32_type, make_castas_fctn_simple<int32_t, int32_t>() },
+    { int32_type, long_type, make_castas_fctn_simple<int32_t, int64_t>() },
+    { int32_type, float_type, make_castas_fctn_simple<int32_t, float>() },
+    { int32_type, double_type, make_castas_fctn_simple<int32_t, double>() },
+    { int32_type, varint_type, make_castas_fctn_simple<int32_t, boost::multiprecision::cpp_int>() },
+    { int32_type, decimal_type, make_castas_fctn_from_decimal_to_float<int32_t>() },
+
+    { long_type, byte_type, make_castas_fctn_simple<int64_t, int8_t>() },
+    { long_type, short_type, make_castas_fctn_simple<int64_t, int16_t>() },
+    { long_type, int32_type, make_castas_fctn_simple<int64_t, int32_t>() },
+    { long_type, long_type, make_castas_fctn_simple<int64_t, int64_t>() },
+    { long_type, float_type, make_castas_fctn_simple<int64_t, float>() },
+    { long_type, double_type, make_castas_fctn_simple<int64_t, double>() },
+    { long_type, varint_type, make_castas_fctn_simple<int64_t, boost::multiprecision::cpp_int>() },
+    { long_type, decimal_type, make_castas_fctn_from_decimal_to_float<int64_t>() },
+
+    { float_type, byte_type, make_castas_fctn_simple<float, int8_t>() },
+    { float_type, short_type, make_castas_fctn_simple<float, int16_t>() },
+    { float_type, int32_type, make_castas_fctn_simple<float, int32_t>() },
+    { float_type, long_type, make_castas_fctn_simple<float, int64_t>() },
+    { float_type, float_type, make_castas_fctn_simple<float, float>() },
+    { float_type, double_type, make_castas_fctn_simple<float, double>() },
+    { float_type, varint_type, make_castas_fctn_simple<float, boost::multiprecision::cpp_int>() },
+    { float_type, decimal_type, make_castas_fctn_from_decimal_to_float<float>() },
+
+    { double_type, byte_type, make_castas_fctn_simple<double, int8_t>() },
+    { double_type, short_type, make_castas_fctn_simple<double, int16_t>() },
+    { double_type, int32_type, make_castas_fctn_simple<double, int32_t>() },
+    { double_type, long_type, make_castas_fctn_simple<double, int64_t>() },
+    { double_type, float_type, make_castas_fctn_simple<double, float>() },
+    { double_type, double_type, make_castas_fctn_simple<double, double>() },
+    { double_type, varint_type, make_castas_fctn_simple<double, boost::multiprecision::cpp_int>() },
+    { double_type, decimal_type, make_castas_fctn_from_decimal_to_float<double>() },
+
+    { varint_type, byte_type, make_castas_fctn_simple<boost::multiprecision::cpp_int, int8_t>() },
+    { varint_type, short_type, make_castas_fctn_simple<boost::multiprecision::cpp_int, int16_t>() },
+    { varint_type, int32_type, make_castas_fctn_simple<boost::multiprecision::cpp_int, int32_t>() },
+    { varint_type, long_type, make_castas_fctn_simple<boost::multiprecision::cpp_int, int64_t>() },
+    { varint_type, float_type, make_castas_fctn_simple<boost::multiprecision::cpp_int, float>() },
+    { varint_type, float_type, make_castas_fctn_simple<boost::multiprecision::cpp_int, double>() },
+    { varint_type, varint_type, make_castas_fctn_simple<boost::multiprecision::cpp_int, boost::multiprecision::cpp_int>() },
+    { varint_type, decimal_type, make_castas_fctn_from_decimal_to_integer<boost::multiprecision::cpp_int>() },
+
+    { ascii_type, byte_type, make_castas_fctn_to_string<int8_t>() },
+    { ascii_type, short_type, make_castas_fctn_to_string<int16_t>() },
+    { ascii_type, int32_type, make_castas_fctn_to_string<int32_t>() },
+    { ascii_type, long_type, make_castas_fctn_to_string<int64_t>() },
+    { ascii_type, float_type, make_castas_fctn_to_string<float>() },
+    { ascii_type, double_type, make_castas_fctn_to_string<double>() },
+    { ascii_type, varint_type, make_castas_fctn_from_varint_to_string() },
+    { ascii_type, decimal_type, make_castas_fctn_from_decimal_to_string() },
+
+    { utf8_type, byte_type, make_castas_fctn_to_string<int8_t>() },
+    { utf8_type, short_type, make_castas_fctn_to_string<int16_t>() },
+    { utf8_type, int32_type, make_castas_fctn_to_string<int32_t>() },
+    { utf8_type, long_type, make_castas_fctn_to_string<int64_t>() },
+    { utf8_type, float_type, make_castas_fctn_to_string<float>() },
+    { utf8_type, double_type, make_castas_fctn_to_string<double>() },
+    { utf8_type, varint_type, make_castas_fctn_from_varint_to_string() },
+    { utf8_type, decimal_type, make_castas_fctn_from_decimal_to_string() },
+
+    { simple_date_type, timestamp_type, make_castas_fctn_from_timestamp_to_date() },
+    { simple_date_type, timeuuid_type, make_castas_fctn_from_timeuuid_to_date() },
+
+    { timestamp_type, simple_date_type, make_castas_fctn_from_date_to_timestamp() },
+    { timestamp_type, timeuuid_type, make_castas_fctn_from_timeuuid_to_timestamp() },
+};

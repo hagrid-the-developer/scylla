@@ -354,6 +354,7 @@ public:
     data_value(float);
     data_value(double);
     data_value(net::ipv4_address);
+    data_value(uint32_t); // Used by simple_date_type
     data_value(db_clock::time_point);
     data_value(boost::multiprecision::cpp_int);
     data_value(big_decimal);
@@ -1249,6 +1250,18 @@ shared_ptr<const abstract_type> data_type_for<double>() {
     return double_type;
 }
 
+template <>
+inline
+shared_ptr<const abstract_type> data_type_for<boost::multiprecision::cpp_int>() {
+    return varint_type;
+}
+
+template <>
+inline
+shared_ptr<const abstract_type> data_type_for<big_decimal>() {
+    return decimal_type;
+}
+
 namespace std {
 
 template <>
@@ -1639,3 +1652,10 @@ struct appending_hash<data_type> {
         feed_hash(h, v->name());
     }
 };
+
+/*
+ * Support for CAST(. AS .) functions.
+ */
+
+using castas_fctn = std::function<data_value(data_value)>;
+extern thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_fctns;

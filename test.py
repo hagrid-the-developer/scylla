@@ -88,6 +88,7 @@ boost_tests = [
     'clustering_ranges_walker_test',
     'vint_serialization_test',
     'duration_test',
+    'castas_fcts_test',
 ]
 
 other_tests = [

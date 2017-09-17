@@ -245,6 +245,7 @@ scylla_tests = [
     'tests/vint_serialization_test',
     'tests/compress_test',
     'tests/chunked_vector_test',
+    'tests/castas_fcts_test',
 ]
 
 apps = [
@@ -355,6 +356,7 @@ scylla_core = (['database.cc',
                  'cql3/sets.cc',
                  'cql3/maps.cc',
                  'cql3/functions/functions.cc',
+                 'cql3/functions/castas_fcts.cc',
                  'cql3/statements/cf_prop_defs.cc',
                  'cql3/statements/cf_statement.cc',
                  'cql3/statements/authentication_statement.cc',
