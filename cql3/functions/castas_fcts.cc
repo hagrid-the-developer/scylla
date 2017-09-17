@@ -8,7 +8,7 @@ namespace {
 
 using opt_bytes = std::experimental::optional<bytes>;
 
-shared_ptr<function> make_castas_fcts(data_type to_type, data_type from_type, castas_fctn f) {
+shared_ptr<function> make_castas_function(data_type to_type, data_type from_type, castas_fctn f) {
     auto name = "castas" + to_type->as_cql3_type()->to_string();
 
     return cql3::functions::make_native_scalar_function<true>(name, to_type, { from_type },
@@ -32,7 +32,7 @@ castas_functions::castas_fcts_map castas_functions::init() {
         auto to_type = std::get<0>(item);
         auto from_type = std::get<1>(item);
         auto f = std::get<2>(item);
-        ret.emplace(std::make_pair(std::make_tuple(to_type, from_type), make_castas_fcts(to_type, from_type, f)));
+        ret.emplace(std::make_pair(std::make_tuple(to_type, from_type), make_castas_function(to_type, from_type, f)));
     }
     return ret;
 }

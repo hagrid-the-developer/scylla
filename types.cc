@@ -3329,7 +3329,7 @@ data_value::data_value(net::ipv4_address v) : data_value(make_new(inet_addr_type
 data_value::data_value(uint32_t v) : data_value(make_new(simple_date_type, v)) {
 }
 
-data_value::data_value(db_clock::time_point v) : data_value(make_new(timestamp_type, v)) {
+data_value::data_value(db_clock::time_point v) : data_value(make_new(date_type, v)) {
 }
 
 data_value::data_value(boost::multiprecision::cpp_int v) : data_value(make_new(varint_type, v)) {
@@ -3436,26 +3436,52 @@ std::function<data_value(data_value)> make_castas_fctn_from_decimal_to_string() 
     };
 }
 
+db_clock::time_point millis_to_time_point(const int64_t millis) {
+    return db_clock::time_point{std::chrono::milliseconds(millis)};
+}
+
+uint32_t time_point_to_date(const db_clock::time_point &tp) {
+    const auto epoch = boost::posix_time::from_time_t(0);
+    auto timestamp = tp.time_since_epoch().count();
+    auto time = boost::posix_time::from_time_t(0) + boost::posix_time::milliseconds(timestamp);
+    const auto diff = time.date() - epoch.date();
+    return uint32_t(diff.days() + (1UL<<31));
+}
+
+db_clock::time_point date_to_time_point(const uint32_t date) {
+    const auto epoch = boost::posix_time::from_time_t(0);
+    // XYZ: Signed from unsigned, what is the result?
+    const auto target_date = epoch + boost::gregorian::days(int64_t(date) - (1UL<<31));
+    boost::posix_time::time_duration duration = target_date - epoch;
+    const auto millis = std::chrono::milliseconds(duration.total_milliseconds());
+    return db_clock::time_point(std::chrono::duration_cast<db_clock::duration>(millis));
+}
+
 std::function<data_value(data_value)> make_castas_fctn_from_timestamp_to_date() {
     return [](data_value from) -> data_value {
         const auto val_from = value_cast<db_clock::time_point>(from);
-        const auto epoch = boost::posix_time::from_time_t(0);
-        auto timestamp = val_from.time_since_epoch().count();
-        auto time = boost::posix_time::from_time_t(0) + boost::posix_time::milliseconds(timestamp);
-        const auto diff = time.date() - epoch.date();
-        return uint32_t(diff.days() + (1UL<<31));
+        return time_point_to_date(val_from);
     };
 }
 
 std::function<data_value(data_value)> make_castas_fctn_from_date_to_timestamp() {
     return [](data_value from) -> data_value {
         const auto val_from = value_cast<uint32_t>(from);
-        const auto epoch = boost::posix_time::from_time_t(0);
-        // XYZ: Signed from unsigned, what is the result?
-        const auto target_date = epoch + boost::gregorian::days(int64_t(val_from) - (1UL<<31));
-        boost::posix_time::time_duration duration = target_date - epoch;
-        const auto millis = std::chrono::milliseconds(duration.total_milliseconds());
-        return db_clock::time_point(std::chrono::duration_cast<db_clock::duration>(millis));
+        return date_to_time_point(val_from);
+    };
+}
+
+std::function<data_value(data_value)> make_castas_fctn_from_timeuuid_to_timestamp() {
+    return [](data_value from) -> data_value {
+        const auto val_from = value_cast<utils::UUID>(from);
+        return millis_to_time_point(val_from.timestamp());
+    };
+}
+
+std::function<data_value(data_value)> make_castas_fctn_from_timeuuid_to_date() {
+    return [](data_value from) -> data_value {
+        const auto val_from = value_cast<utils::UUID>(from);
+        return time_point_to_date(millis_to_time_point(val_from.timestamp()));
     };
 }
 
@@ -3544,8 +3570,11 @@ thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_f
     { utf8_type, varint_type, make_castas_fctn_from_varint_to_string() },
     { utf8_type, decimal_type, make_castas_fctn_from_decimal_to_string() },
 
-    { timestamp_type, simple_date_type, make_castas_fctn_from_date_to_timestamp() },
     { simple_date_type, timestamp_type, make_castas_fctn_from_timestamp_to_date() },
+    { simple_date_type, timeuuid_type, make_castas_fctn_from_timeuuid_to_date() },
+
+    { timestamp_type, simple_date_type, make_castas_fctn_from_date_to_timestamp() },
+    { timestamp_type, timeuuid_type, make_castas_fctn_from_timeuuid_to_timestamp() },
 };
 
 // FIXME: Remove me and everything bellow.
