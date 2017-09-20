@@ -144,19 +144,16 @@ selectable::with_field_selection::raw::processes_selection() const {
 
 shared_ptr<selector::factory>
 selectable::with_cast::new_selector_factory(database& db, schema_ptr s, std::vector<const column_definition*>& defs) {
-    // XYZ: This conversaion to array is ugly. :-(
     std::vector<shared_ptr<selectable>> args{_arg};
     auto&& factories = selector_factories::create_factories_and_collect_column_definitions(args, db, s, defs);
     std::cerr << "selectable::with_cast::new_selector_factory(): " << defs.size() << "; " << "type: " << _type << "factories.size:" << factories->new_instances().size() << std::endl;
-    auto &&fun = functions::castas_functions::get(_type->get_type(), factories->new_instances(), s);
-    // XYZ: assert(fun);
+    auto&& fun = functions::castas_functions::get(_type->get_type(), factories->new_instances(), s);
 
     return abstract_function_selector::new_factory(std::move(fun), std::move(factories));
 }
 
 sstring
 selectable::with_cast::to_string() const {
-    // XYZ: Is it necessary to call to_string() ?
     return sprint("cast(%s as %s)", _arg->to_string(), _type->to_string());
 }
 
@@ -167,7 +164,6 @@ selectable::with_cast::raw::prepare(schema_ptr s) {
 
 bool
 selectable::with_cast::raw::processes_selection() const {
-    // XYZ: What to return here?
     return true;
 }
 

@@ -38,7 +38,6 @@
 #include <sstream>
 #include <string>
 #include <regex>
-#include <type_traits>
 #include <boost/iterator/transform_iterator.hpp>
 #include <boost/range/adaptor/filtered.hpp>
 #include <boost/range/numeric.hpp>
@@ -50,9 +49,6 @@
 #include "utils/big_decimal.hh"
 #include "utils/date.h"
 #include "mutation_partition.hh"
-#include "cql3/functions/function.hh"
-#include "cql3/functions/abstract_function.hh"
-#include "cql3/functions/native_scalar_function.hh"
 
 template<typename T>
 sstring time_point_to_string(const T& tp)
@@ -3401,7 +3397,7 @@ std::function<data_value(data_value)> make_castas_fctn_simple() {
 }
 
 template<typename ToType>
-std::function<data_value(data_value)> make_castas_fctn_from_decimal() {
+std::function<data_value(data_value)> make_castas_fctn_from_decimal_to_float() {
     return [](data_value from) -> data_value {
         auto val_from = value_cast<big_decimal>(from);
         boost::multiprecision::cpp_int ten(10);
@@ -3485,6 +3481,18 @@ std::function<data_value(data_value)> make_castas_fctn_from_timeuuid_to_date() {
     };
 }
 
+std::function<data_value(data_value)> make_castas_fctn_from_timestamp_to_time() {
+    return [](data_value from) -> data_value {
+        const auto epoch = boost::posix_time::from_time_t(0);
+        const auto val_from = value_cast<db_clock::time_point>(from);
+        const auto time = epoch + boost::posix_time::milliseconds(val_from.time_since_epoch().count());
+        auto ptime_midnight = boost::posix_time::ptime(time.date(), boost::posix_time::time_duration{});
+        std::chrono::nanoseconds nanos{};
+        nanos += std::chrono::milliseconds(val_from.time_since_epoch().count() - (ptime_midnight - epoch).total_milliseconds());
+        return int64_t(nanos.count());
+    };
+}
+
 } /* Anonymous Namespace */
 
 // Table of castas functions...
@@ -3496,7 +3504,7 @@ thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_f
     { byte_type, float_type, make_castas_fctn_simple<int8_t, float>() },
     { byte_type, double_type, make_castas_fctn_simple<int8_t, double>() },
     { byte_type, varint_type, make_castas_fctn_simple<int8_t, boost::multiprecision::cpp_int>() },
-    { byte_type, decimal_type, make_castas_fctn_from_decimal<int8_t>() },
+    { byte_type, decimal_type, make_castas_fctn_from_decimal_to_float<int8_t>() },
 
     { short_type, byte_type, make_castas_fctn_simple<int16_t, int8_t>() },
     { short_type, short_type, make_castas_fctn_simple<int16_t, int16_t>() },
@@ -3505,7 +3513,7 @@ thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_f
     { short_type, float_type, make_castas_fctn_simple<int16_t, float>() },
     { short_type, double_type, make_castas_fctn_simple<int16_t, double>() },
     { short_type, varint_type, make_castas_fctn_simple<int16_t, boost::multiprecision::cpp_int>() },
-    { short_type, decimal_type, make_castas_fctn_from_decimal<int16_t>() },
+    { short_type, decimal_type, make_castas_fctn_from_decimal_to_float<int16_t>() },
 
     { int32_type, byte_type, make_castas_fctn_simple<int32_t, int8_t>() },
     { int32_type, short_type, make_castas_fctn_simple<int32_t, int16_t>() },
@@ -3514,7 +3522,7 @@ thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_f
     { int32_type, float_type, make_castas_fctn_simple<int32_t, float>() },
     { int32_type, double_type, make_castas_fctn_simple<int32_t, double>() },
     { int32_type, varint_type, make_castas_fctn_simple<int32_t, boost::multiprecision::cpp_int>() },
-    { int32_type, decimal_type, make_castas_fctn_from_decimal<int32_t>() },
+    { int32_type, decimal_type, make_castas_fctn_from_decimal_to_float<int32_t>() },
 
     { long_type, byte_type, make_castas_fctn_simple<int64_t, int8_t>() },
     { long_type, short_type, make_castas_fctn_simple<int64_t, int16_t>() },
@@ -3523,7 +3531,7 @@ thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_f
     { long_type, float_type, make_castas_fctn_simple<int64_t, float>() },
     { long_type, double_type, make_castas_fctn_simple<int64_t, double>() },
     { long_type, varint_type, make_castas_fctn_simple<int64_t, boost::multiprecision::cpp_int>() },
-    { long_type, decimal_type, make_castas_fctn_from_decimal<int64_t>() },
+    { long_type, decimal_type, make_castas_fctn_from_decimal_to_float<int64_t>() },
 
     { float_type, byte_type, make_castas_fctn_simple<float, int8_t>() },
     { float_type, short_type, make_castas_fctn_simple<float, int16_t>() },
@@ -3532,7 +3540,7 @@ thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_f
     { float_type, float_type, make_castas_fctn_simple<float, float>() },
     { float_type, double_type, make_castas_fctn_simple<float, double>() },
     { float_type, varint_type, make_castas_fctn_simple<float, boost::multiprecision::cpp_int>() },
-    { float_type, decimal_type, make_castas_fctn_from_decimal<float>() },
+    { float_type, decimal_type, make_castas_fctn_from_decimal_to_float<float>() },
 
     { double_type, byte_type, make_castas_fctn_simple<double, int8_t>() },
     { double_type, short_type, make_castas_fctn_simple<double, int16_t>() },
@@ -3541,7 +3549,7 @@ thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_f
     { double_type, float_type, make_castas_fctn_simple<double, float>() },
     { double_type, double_type, make_castas_fctn_simple<double, double>() },
     { double_type, varint_type, make_castas_fctn_simple<double, boost::multiprecision::cpp_int>() },
-    { double_type, decimal_type, make_castas_fctn_from_decimal<double>() },
+    { double_type, decimal_type, make_castas_fctn_from_decimal_to_float<double>() },
 
     { varint_type, byte_type, make_castas_fctn_simple<boost::multiprecision::cpp_int, int8_t>() },
     { varint_type, short_type, make_castas_fctn_simple<boost::multiprecision::cpp_int, int16_t>() },
@@ -3575,224 +3583,6 @@ thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_f
 
     { timestamp_type, simple_date_type, make_castas_fctn_from_date_to_timestamp() },
     { timestamp_type, timeuuid_type, make_castas_fctn_from_timeuuid_to_timestamp() },
+
+    { time_type, timestamp_type, make_castas_fctn_from_timestamp_to_time() },
 };
-
-// FIXME: Remove me and everything bellow.
-#if 0
-
-template <typename T>
-shared_ptr<const abstract_type> get_data_type(const concrete_type<T>&) {
-    return data_type_for<T>();
-}
-shared_ptr<const abstract_type> get_data_type(const ascii_type_impl&) {
-    return ascii_type;
-}
-shared_ptr<const abstract_type> get_data_type(const simple_date_type_impl&) {
-    return simple_date_type;
-}
-shared_ptr<const abstract_type> get_data_type(const timestamp_type_impl&) {
-    return timestamp_type;
-}
-
-template <typename ToTypeImpl, typename FromTypeImpl, typename F, typename FromType, typename ToType>
-shared_ptr<cql3::functions::function> make_castas_function_f(const ToTypeImpl &to, const FromTypeImpl &from, F f, const concrete_type<ToType>&, const concrete_type <FromType>&) {
-    auto from_type = get_data_type(from);
-    auto to_type = get_data_type(to);
-    auto name = "castas" + to_type->as_cql3_type()->to_string();
-    return cql3::functions::make_native_scalar_function<true>(name, to_type, { from_type },
-                                             [to_type, from_type, f] (cql_serialization_format sf, const std::vector<bytes_opt>& parameters) -> opt_bytes {
-        auto&& val = parameters[0];
-        if (!val) {
-            return val;
-        }
-
-        auto val_from = value_cast<FromType>(from_type->deserialize(*val));
-        ToType val_to = f(val_from);
-        return to_type->decompose(val_to);
-    });
-}
-template <typename ToTypeImpl, typename FromTypeImpl, typename F>
-shared_ptr<cql3::functions::function> make_castas_function_f(const ToTypeImpl &to, const FromTypeImpl &from, F f) {
-    return make_castas_function_f(to, from, f, to, from);
-}
-
-template<typename ToTypeImpl, typename FromTypeImpl, typename ToType, typename FromType>
-shared_ptr<cql3::functions::function> make_castas_function_simple(const ToTypeImpl &to, const FromTypeImpl &from, const concrete_type<ToType>&, const concrete_type<FromType>&) {
-    auto from_type = get_data_type(from);
-    auto to_type = get_data_type(to);
-    auto name = "castas" + to_type->as_cql3_type()->to_string();
-
-    return cql3::functions::make_native_scalar_function<true>(name, to_type, { from_type },
-        [from_type, to_type] (cql_serialization_format sf, const std::vector<bytes_opt>& parameters) -> opt_bytes {
-        auto&& val = parameters[0];
-        if (!val) {
-            return val;
-        }
-        FromType val_from = value_cast<FromType>(from_type->deserialize(*val));
-        ToType val_to = static_cast<ToType>(val_from);
-        return to_type->decompose(val_to);
-    });
-}
-
-template<typename TypeImpl>
-shared_ptr<cql3::functions::function> make_castas_function_trivial(const TypeImpl &to, const TypeImpl &from) {
-    assert(get_data_type(from) == get_data_type(to));
-
-    auto type = get_data_type(from);
-    auto name = "castas" + type->as_cql3_type()->to_string();
-
-    return cql3::functions::make_native_scalar_function<true>(name, type, { type },
-        [] (cql_serialization_format sf, const std::vector<bytes_opt>& parameters) -> opt_bytes {
-        auto&& val = parameters[0];
-        return val;
-    });
-}
-
-template<typename ToTypeImpl, typename FromTypeImpl>
-shared_ptr<cql3::functions::function> make_castas_function_to_str(const ToTypeImpl &to, const FromTypeImpl &from) {
-    auto from_type = get_data_type(from);
-    auto to_type = get_data_type(to);
-    auto name = "castas" + to_type->as_cql3_type()->to_string();
-    return cql3::functions::make_native_scalar_function<true>(name, to_type, { from_type },
-                                             [from_type, to_type] (cql_serialization_format sf, const std::vector<bytes_opt>& parameters) -> opt_bytes {
-        auto&& val = parameters[0];
-        if (!val) {
-            return val;
-        }
-        return to_type->decompose(from_type->to_string(*val));
-    });
-}
-
-template<typename ToTypeImpl, typename FromTypeImpl, typename ToType>
-shared_ptr<cql3::functions::function> make_castas_function_to_compatible(const ToTypeImpl &to, const FromTypeImpl &from, const concrete_type<ToType>&) {
-    auto from_type = get_data_type(from);
-    auto to_type = get_data_type(to);
-    auto name = "castas" + to_type->as_cql3_type()->to_string();
-    return cql3::functions::make_native_scalar_function<true>(name, to_type, { from_type },
-                                             [from_type, to_type] (cql_serialization_format sf, const std::vector<bytes_opt>& parameters) -> opt_bytes {
-        auto&& val = parameters[0];
-        if (!val) {
-            return val;
-        }
-        return to_type->decompose(value_cast<ToType>(from_type->deserialize(*val)));
-    });
-}
-
-template<typename FromType>
-shared_ptr<cql3::functions::function> make_castas_function_to_decimal(const concrete_type<FromType>&) {
-    auto from_type = data_type_for<FromType>();
-    auto to_type = decimal_type;
-    auto name = "castas" + to_type->as_cql3_type()->to_string();
-    return cql3::functions::make_native_scalar_function<true>(name, to_type, { from_type },
-                                             [] (cql_serialization_format sf, const std::vector<bytes_opt>& parameters) -> opt_bytes {
-        auto&& val = parameters[0];
-        if (!val) {
-            return val;
-        }
-        return decimal_type->decompose(big_decimal(data_type_for<FromType>()->to_string(*val)));
-    });
-}
-
-template<typename ToType, typename FromType>
-shared_ptr<cql3::functions::function> make_castas_function(const simple_type_impl<ToType> &to, const simple_type_impl<FromType> &from) {
-    return make_castas_function_simple<>(to, from, to, from);
-}
-
-template<typename TypeImpl>
-shared_ptr<cql3::functions::function> make_castas_function(const TypeImpl &to, const TypeImpl &from) {
-    return make_castas_function_trivial<>(to, from);
-}
-
-template<typename FromType>
-shared_ptr<cql3::functions::function> make_castas_function(const decimal_type_impl &to, const simple_type_impl<FromType> &from) {
-    return make_castas_function_to_decimal<>(from);
-}
-
-template<typename FromType>
-shared_ptr<cql3::functions::function> make_castas_function(const varint_type_impl &to, const simple_type_impl<FromType> &from) {
-    return make_castas_function_simple<>(to, from, to, from);
-}
-
-template<typename ToType>
-shared_ptr<cql3::functions::function> make_castas_function(const simple_type_impl<ToType> &to, const decimal_type_impl &from) {
-    return make_castas_function_f(to, from, [](auto val_from) {
-        boost::multiprecision::cpp_int ten(10);
-        boost::multiprecision::cpp_rational r = val_from.unscaled_value();
-        r /= boost::multiprecision::pow(ten, val_from.scale());
-        return static_cast<ToType>(r);
-    });
-}
-
-template<typename ToType>
-shared_ptr<cql3::functions::function> make_castas_function(const simple_type_impl<ToType> &to, const varint_type_impl &from) {
-    return make_castas_function_simple<>(to, from, to, from);
-}
-template<typename FromTypeImpl>
-std::enable_if_t<!std::is_same<FromTypeImpl, utf8_type_impl>::value, shared_ptr<cql3::functions::function>> make_castas_function(const utf8_type_impl &to, const FromTypeImpl &from) {
-    return make_castas_function_to_str<>(to, from);
-}
-template<typename FromTypeImpl>
-std::enable_if_t<!std::is_same<FromTypeImpl, ascii_type_impl>::value, shared_ptr<cql3::functions::function>> make_castas_function(const ascii_type_impl &to, const FromTypeImpl &from) {
-    return make_castas_function_to_str<>(to, from);
-}
-/*
-shared_ptr<cql3::functions::function> make_castas_function(const date_type_impl &to, const timestamp_type_impl &from) {
-    return make_castas_function_to_compatible<>(to, from, to);
-}
-
-shared_ptr<cql3::functions::function> make_castas_function(const timestamp_type_impl &to, const date_type_impl &from) {
-    return make_castas_function_to_compatible<>(to, from, to);
-}
-*/
-shared_ptr<cql3::functions::function> make_castas_function(const timestamp_type_impl &to, const simple_date_type_impl &from) {
-    return make_castas_function_f(to, from, [](auto val_from) {
-        const auto epoch = boost::posix_time::from_time_t(0);
-        const auto target_date = epoch + boost::gregorian::days(int64_t(val_from) - (1UL<<31));
-        boost::posix_time::time_duration duration = target_date - epoch;
-        return db_clock::from_time_t(duration.total_seconds());
-    });
-}
-shared_ptr<cql3::functions::function> make_castas_function(const simple_date_type_impl &to, const timestamp_type_impl &from) {
-    return make_castas_function_f(to, from, [](db_clock::time_point val_from) {
-        return uint32_t(std::chrono::duration_cast<std::chrono::hours>(val_from.time_since_epoch()/24).count());
-    });
-}
-
-template <typename FromTypeImpl, typename ...ToTypesImpl>
-struct FromToImpl;
-template <typename FromTypeImpl>
-struct FromToImpl<FromTypeImpl> {
-    static void def(castas_map&) {
-    }
-};
-template <typename FromTypeImpl, typename ToTypeImpl, typename ...ToTypesImpl>
-struct FromToImpl<FromTypeImpl, ToTypeImpl, ToTypesImpl...> {
-    static void def(castas_map &map) {
-        map.emplace(castas_map_key{get_data_type(ToTypeImpl()), get_data_type(FromTypeImpl())}, make_castas_function(ToTypeImpl(), FromTypeImpl()));
-        FromToImpl<FromTypeImpl, ToTypesImpl...>::def(map);
-    }
-};
-
-template <typename FromTypeImpl>
-struct From {
-    template <typename ...ToTypesImpl>
-    using To = FromToImpl<FromTypeImpl, ToTypesImpl...>;
-};
-
-} /* anonymous namespace */
-
-castas_map::castas_map() {
-    From<byte_type_impl>::To<byte_type_impl, short_type_impl, int32_type_impl, long_type_impl, float_type_impl, double_type_impl, utf8_type_impl, ascii_type_impl, varint_type_impl, decimal_type_impl>::def(*this);
-    From<short_type_impl>::To<byte_type_impl, short_type_impl, int32_type_impl, long_type_impl, float_type_impl, double_type_impl, utf8_type_impl, ascii_type_impl, varint_type_impl, decimal_type_impl>::def(*this);
-    From<int32_type_impl>::To<byte_type_impl, short_type_impl, int32_type_impl, long_type_impl, float_type_impl, double_type_impl, utf8_type_impl, ascii_type_impl, varint_type_impl, decimal_type_impl>::def(*this);
-    From<long_type_impl>::To<byte_type_impl, short_type_impl, int32_type_impl, long_type_impl, float_type_impl, double_type_impl, utf8_type_impl, ascii_type_impl, varint_type_impl, decimal_type_impl>::def(*this);
-    From<float_type_impl>::To<byte_type_impl, short_type_impl, int32_type_impl, long_type_impl, float_type_impl, double_type_impl, utf8_type_impl, ascii_type_impl, varint_type_impl, decimal_type_impl>::def(*this);
-    From<double_type_impl>::To<byte_type_impl, short_type_impl, int32_type_impl, long_type_impl, float_type_impl, double_type_impl, utf8_type_impl, ascii_type_impl, varint_type_impl, decimal_type_impl>::def(*this);
-    From<varint_type_impl>::To<byte_type_impl, short_type_impl, int32_type_impl, long_type_impl, float_type_impl, double_type_impl, utf8_type_impl, ascii_type_impl/*, varint_type_impl, decimal_type_impl*/>::def(*this);
-    From<decimal_type_impl>::To<byte_type_impl, short_type_impl, int32_type_impl, long_type_impl, float_type_impl, double_type_impl, utf8_type_impl, ascii_type_impl/*, varint_type_impl, decimal_type_impl*/>::def(*this);
-    From<ascii_type_impl>::To<ascii_type_impl, utf8_type_impl>::def(*this);
-    From<utf8_type_impl>::To<utf8_type_impl>::def(*this);
-    From<timestamp_type_impl>::To<timestamp_type_impl, simple_date_type_impl, ascii_type_impl, utf8_type_impl>::def(*this);
-    From<simple_date_type_impl>::To<timestamp_type_impl, simple_date_type_impl, ascii_type_impl, utf8_type_impl>::def(*this);
-}
-#endif

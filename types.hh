@@ -1178,29 +1178,6 @@ extern thread_local const shared_ptr<const abstract_type> counter_type;
 extern thread_local const shared_ptr<const abstract_type> duration_type;
 extern thread_local const data_type empty_type;
 
-struct byte_type_impl;
-struct short_type_impl;
-struct int32_type_impl;
-struct long_type_impl;
-struct ascii_type_impl;
-struct bytes_type_impl;
-struct utf8_type_impl;
-struct boolean_type_impl;
-struct date_type_impl;
-struct timeuuid_type_impl;
-struct timestamp_type_impl;
-struct simple_date_type_impl;
-struct time_type_impl;
-struct uuid_type_impl;
-struct inet_addr_type_impl;
-struct float_type_impl;
-struct double_type_impl;
-struct varint_type_impl;
-struct decimal_type_impl;
-struct counter_type_impl;
-struct duration_type_impl;
-struct empty_type_impl;
-
 template <>
 inline
 shared_ptr<const abstract_type> data_type_for<int8_t>() {
