@@ -33,6 +33,7 @@
 #include "utils/serialization.hh"
 #include "vint-serialization.hh"
 #include "combine.hh"
+#include "utils/UUID_gen.hh"
 #include <cmath>
 #include <chrono>
 #include <sstream>
@@ -56,6 +57,22 @@ sstring time_point_to_string(const T& tp)
     auto timestamp = tp.time_since_epoch().count();
     auto time = boost::posix_time::from_time_t(0) + boost::posix_time::milliseconds(timestamp);
     return boost::posix_time::to_iso_extended_string(time);
+}
+
+sstring simple_date_to_string(const uint32_t days_count) {
+    date::days days{days_count - (1UL << 31)};
+    date::year_month_day ymd{date::local_days{days}};
+    std::ostringstream str;
+    str << ymd;
+    return str.str();
+}
+
+sstring time_to_string(const int64_t nanoseconds_count) {
+    std::chrono::nanoseconds nanoseconds{nanoseconds_count};
+    auto time = date::make_time(nanoseconds);
+    std::ostringstream str;
+    str << time;
+    return str.str();
 }
 
 static const char* byte_type_name      = "org.apache.cassandra.db.marshal.ByteType";
@@ -714,7 +731,7 @@ public:
                 return v;
             }
 
-            std::regex date_re("^(\\d{4})-(\\d+)-(\\d+)([ t](\\d+):(\\d+)(:(\\d+)(\\.(\\d+))?)?)?");
+            std::regex date_re("^(\\d{4})-(\\d+)-(\\d+)([ Tt](\\d+):(\\d+)(:(\\d+)(\\.(\\d+))?)?)?");
             std::smatch dsm;
             if (!std::regex_search(str, dsm, date_re)) {
                 throw marshal_exception();
@@ -860,11 +877,7 @@ struct simple_date_type_impl : public simple_type_impl<uint32_t> {
         if (v.is_null()) {
             return "";
         }
-        date::days days{from_value(v).get() - (1UL << 31)};
-        date::year_month_day ymd{date::local_days{days}};
-        std::ostringstream str;
-        str << ymd;
-        return str.str();
+        return simple_date_to_string(from_value(v).get());
     }
     virtual ::shared_ptr<cql3::cql3_type> as_cql3_type() const override {
         return cql3::cql3_type::date;
@@ -959,11 +972,7 @@ struct time_type_impl : public simple_type_impl<int64_t> {
         if (v.is_null()) {
             return "";
         }
-        std::chrono::nanoseconds nanoseconds{from_value(v).get()};
-        auto time = date::make_time(nanoseconds);
-        std::ostringstream str;
-        str << time;
-        return str.str();
+        return time_to_string(from_value(v).get());
     }
     virtual ::shared_ptr<cql3::cql3_type> as_cql3_type() const override {
         return cql3::cql3_type::time;
@@ -3453,6 +3462,18 @@ db_clock::time_point date_to_time_point(const uint32_t date) {
     return db_clock::time_point(std::chrono::duration_cast<db_clock::duration>(millis));
 }
 
+/*
+ * Converts db_clock::time_point to the number of nanoseconds since midnight.
+ */
+int64_t time_point_to_time(const db_clock::time_point &tp) {
+        const auto epoch = boost::posix_time::from_time_t(0);
+        const auto time = epoch + boost::posix_time::milliseconds(tp.time_since_epoch().count());
+        auto ptime_midnight = boost::posix_time::ptime(time.date(), boost::posix_time::time_duration{});
+        std::chrono::nanoseconds nanos{};
+        nanos += std::chrono::milliseconds(tp.time_since_epoch().count() - (ptime_midnight - epoch).total_milliseconds());
+        return int64_t(nanos.count());
+}
+
 std::function<data_value(data_value)> make_castas_fctn_from_timestamp_to_date() {
     return [](data_value from) -> data_value {
         const auto val_from = value_cast<db_clock::time_point>(from);
@@ -3470,26 +3491,53 @@ std::function<data_value(data_value)> make_castas_fctn_from_date_to_timestamp() 
 std::function<data_value(data_value)> make_castas_fctn_from_timeuuid_to_timestamp() {
     return [](data_value from) -> data_value {
         const auto val_from = value_cast<utils::UUID>(from);
-        return millis_to_time_point(val_from.timestamp());
+        return utils::UUID_gen::unix_timestamp(val_from);
     };
 }
 
 std::function<data_value(data_value)> make_castas_fctn_from_timeuuid_to_date() {
     return [](data_value from) -> data_value {
         const auto val_from = value_cast<utils::UUID>(from);
-        return time_point_to_date(millis_to_time_point(val_from.timestamp()));
+        return time_point_to_date(millis_to_time_point(utils::UUID_gen::unix_timestamp(val_from)));
+    };
+}
+
+std::function<data_value(data_value)> make_castas_fctn_from_timeuuid_to_time() {
+    return [](data_value from) -> data_value {
+        const auto val_from = value_cast<utils::UUID>(from);
+        return time_point_to_time(millis_to_time_point(utils::UUID_gen::unix_timestamp(val_from)));
     };
 }
 
 std::function<data_value(data_value)> make_castas_fctn_from_timestamp_to_time() {
     return [](data_value from) -> data_value {
-        const auto epoch = boost::posix_time::from_time_t(0);
         const auto val_from = value_cast<db_clock::time_point>(from);
-        const auto time = epoch + boost::posix_time::milliseconds(val_from.time_since_epoch().count());
-        auto ptime_midnight = boost::posix_time::ptime(time.date(), boost::posix_time::time_duration{});
-        std::chrono::nanoseconds nanos{};
-        nanos += std::chrono::milliseconds(val_from.time_since_epoch().count() - (ptime_midnight - epoch).total_milliseconds());
-        return int64_t(nanos.count());
+        return time_point_to_time(val_from);
+    };
+}
+
+std::function<data_value(data_value)> make_castas_fctn_from_timestamp_to_string() {
+    return [](data_value from) -> data_value {
+        const auto val_from = value_cast<db_clock::time_point>(from);
+        return time_point_to_string(val_from);
+    };
+}
+
+std::function<data_value(data_value)> make_castas_fctn_from_simple_date_to_string() {
+    return [](data_value from) -> data_value {
+        return simple_date_to_string(value_cast<uint32_t>(from));
+    };
+}
+
+std::function<data_value(data_value)> make_castas_fctn_from_time_to_string() {
+    return [](data_value from) -> data_value {
+        return time_to_string(value_cast<int64_t>(from));
+    };
+}
+
+std::function<data_value(data_value)> make_castas_fctn_from_uuid_to_string() {
+    return [](data_value from) -> data_value {
+        return value_cast<utils::UUID>(from).to_sstring();
     };
 }
 
@@ -3585,4 +3633,11 @@ thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_f
     { timestamp_type, timeuuid_type, make_castas_fctn_from_timeuuid_to_timestamp() },
 
     { time_type, timestamp_type, make_castas_fctn_from_timestamp_to_time() },
+    { time_type, timeuuid_type, make_castas_fctn_from_timeuuid_to_time() },
+
+    { utf8_type, timestamp_type, make_castas_fctn_from_timestamp_to_string() },
+    { utf8_type, simple_date_type, make_castas_fctn_from_simple_date_to_string() },
+    { utf8_type, time_type, make_castas_fctn_from_time_to_string() },
+    { utf8_type, timeuuid_type, make_castas_fctn_from_uuid_to_string() },
+    { utf8_type, uuid_type, make_castas_fctn_from_uuid_to_string() },
 };

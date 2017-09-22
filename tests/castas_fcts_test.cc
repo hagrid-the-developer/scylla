@@ -373,6 +373,56 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
 
 #endif
 
+SEASTAR_TEST_CASE(test_time_casts_in_selection_clause) {
+    return do_with_cql_env_thread([&] (auto& e) {
+        e.execute_cql("CREATE TABLE test (a timeuuid primary key,"
+                      "b timestamp,"
+                      "c date,"
+                      "d time)").get();
+
+        e.execute_cql("INSERT INTO test (a, b, c, d) VALUES (d2177dd0-eaa2-11de-a572-001b779c76e3, '2015-05-21 11:03:02+00', '2015-05-21', '11:03:02')").get();
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS timestamp), CAST(a AS date), CAST(a AS time), CAST(b as date), CAST(b AS time), CAST(c AS timestamp) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{timestamp_type->from_string("2009-12-17t00:26:29.805+00")},
+                                                              {simple_date_type->from_string("2009-12-17")},
+                                                              {time_type->from_string("00:26:29.805000000")},
+                                                              {simple_date_type->from_string("2015-05-21")},
+                                                              {time_type->from_string("11:03:02.000000000")},
+                                                              {timestamp_type->from_string("2015-05-21t00:00:00+00")}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(CAST(a AS timestamp) AS text), CAST(CAST(a AS date) AS text), CAST(CAST(a AS time) AS text), CAST(CAST(b as date) AS text), CAST(CAST(b AS time) AS text), CAST(CAST(c AS timestamp) AS text) FROM test").get0();
+            /*
+        std::cerr << "XYZ: [0]: " << ( timestamp_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[0].value()) ) << ";" << std::endl;
+        std::cerr << "XYZ: [0]: " << value_cast<db_clock::time_point>( timestamp_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[0].value()) ).time_since_epoch().count() << ";" << std::endl;
+        std::cerr << "XYZ: [0]: " << value_cast<db_clock::time_point>( timestamp_type->deserialize( timestamp_type->from_string("2009-12-17t00:26:29.805+00")) ).time_since_epoch().count() << ";" << std::endl;
+        std::cerr << "XYZ: [1]: " << ( simple_date_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[1].value()) ) << ";" << std::endl;
+        std::cerr << "XYZ: [2]: " << ( time_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[2].value()) ) << ";" << std::endl;
+        std::cerr << "XYZ: [3]: " << ( simple_date_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[3].value()) ) << ";" << std::endl;
+        std::cerr << "XYZ: [4]: " << ( time_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[4].value()) ) << ";" << std::endl;
+        std::cerr << "XYZ: [5]: " << ( timestamp_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[5].value()) ) << ";" << std::endl;
+        std::cerr << "XYZ: [0]: " << ( utf8_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[0].value()) ) << ";" << std::endl;
+        std::cerr << "XYZ: [1]: " << ( utf8_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[1].value()) ) << ";" << std::endl;
+        std::cerr << "XYZ: [2]: " << ( utf8_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[2].value()) ) << ";" << std::endl;
+        std::cerr << "XYZ: [3]: " << ( utf8_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[3].value()) ) << ";" << std::endl;
+        */
+            assert_that(msg).is_rows().with_size(1).with_row({{utf8_type->from_string("2009-12-17T00:26:29.805000")},
+                                                              {utf8_type->from_string("2009-12-17")},
+                                                              {utf8_type->from_string("00:26:29.805000000")},
+                                                              {utf8_type->from_string("2015-05-21")},
+                                                              {utf8_type->from_string("11:03:02.000000000")},
+                                                              {utf8_type->from_string("2015-05-21T00:00:00")}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS text), CAST(b as text), CAST(c AS text), CAST(d AS text) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{utf8_type->from_string("d2177dd0-eaa2-11de-a572-001b779c76e3")},
+                                                              {utf8_type->from_string("2015-05-21T11:03:02")},
+                                                              {utf8_type->from_string("2015-05-21")},
+                                                              {utf8_type->from_string("11:03:02.000000000")}});
+        }
+    });
+}
+
 #if 0
     @Test
     public void testTimeCastsInSelectionClause() throws Throwable
