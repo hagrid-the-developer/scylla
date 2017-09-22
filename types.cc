@@ -3635,6 +3635,12 @@ thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_f
     { time_type, timestamp_type, make_castas_fctn_from_timestamp_to_time() },
     { time_type, timeuuid_type, make_castas_fctn_from_timeuuid_to_time() },
 
+    { ascii_type, timestamp_type, make_castas_fctn_from_timestamp_to_string() },
+    { ascii_type, simple_date_type, make_castas_fctn_from_simple_date_to_string() },
+    { ascii_type, time_type, make_castas_fctn_from_time_to_string() },
+    { ascii_type, timeuuid_type, make_castas_fctn_from_uuid_to_string() },
+    { ascii_type, uuid_type, make_castas_fctn_from_uuid_to_string() },
+
     { utf8_type, timestamp_type, make_castas_fctn_from_timestamp_to_string() },
     { utf8_type, simple_date_type, make_castas_fctn_from_simple_date_to_string() },
     { utf8_type, time_type, make_castas_fctn_from_time_to_string() },

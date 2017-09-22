@@ -390,8 +390,6 @@ SEASTAR_TEST_CASE(test_time_casts_in_selection_clause) {
                                                               {time_type->from_string("11:03:02.000000000")},
                                                               {timestamp_type->from_string("2015-05-21t00:00:00+00")}});
         }
-        {
-            auto msg = e.execute_cql("SELECT CAST(CAST(a AS timestamp) AS text), CAST(CAST(a AS date) AS text), CAST(CAST(a AS time) AS text), CAST(CAST(b as date) AS text), CAST(CAST(b AS time) AS text), CAST(CAST(c AS timestamp) AS text) FROM test").get0();
             /*
         std::cerr << "XYZ: [0]: " << ( timestamp_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[0].value()) ) << ";" << std::endl;
         std::cerr << "XYZ: [0]: " << value_cast<db_clock::time_point>( timestamp_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[0].value()) ).time_since_epoch().count() << ";" << std::endl;
@@ -406,6 +404,8 @@ SEASTAR_TEST_CASE(test_time_casts_in_selection_clause) {
         std::cerr << "XYZ: [2]: " << ( utf8_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[2].value()) ) << ";" << std::endl;
         std::cerr << "XYZ: [3]: " << ( utf8_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[3].value()) ) << ";" << std::endl;
         */
+        {
+            auto msg = e.execute_cql("SELECT CAST(CAST(a AS timestamp) AS text), CAST(CAST(a AS date) AS text), CAST(CAST(a AS time) AS text), CAST(CAST(b as date) AS text), CAST(CAST(b AS time) AS text), CAST(CAST(c AS timestamp) AS text) FROM test").get0();
             assert_that(msg).is_rows().with_size(1).with_row({{utf8_type->from_string("2009-12-17T00:26:29.805000")},
                                                               {utf8_type->from_string("2009-12-17")},
                                                               {utf8_type->from_string("00:26:29.805000000")},
@@ -419,6 +419,22 @@ SEASTAR_TEST_CASE(test_time_casts_in_selection_clause) {
                                                               {utf8_type->from_string("2015-05-21T11:03:02")},
                                                               {utf8_type->from_string("2015-05-21")},
                                                               {utf8_type->from_string("11:03:02.000000000")}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(CAST(a AS timestamp) AS ascii), CAST(CAST(a AS date) AS ascii), CAST(CAST(a AS time) AS ascii), CAST(CAST(b as date) AS ascii), CAST(CAST(b AS time) AS ascii), CAST(CAST(c AS timestamp) AS ascii) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{ascii_type->from_string("2009-12-17T00:26:29.805000")},
+                                                              {ascii_type->from_string("2009-12-17")},
+                                                              {ascii_type->from_string("00:26:29.805000000")},
+                                                              {ascii_type->from_string("2015-05-21")},
+                                                              {ascii_type->from_string("11:03:02.000000000")},
+                                                              {ascii_type->from_string("2015-05-21T00:00:00")}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS ascii), CAST(b as ascii), CAST(c AS ascii), CAST(d AS ascii) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{ascii_type->from_string("d2177dd0-eaa2-11de-a572-001b779c76e3")},
+                                                              {ascii_type->from_string("2015-05-21T11:03:02")},
+                                                              {ascii_type->from_string("2015-05-21")},
+                                                              {ascii_type->from_string("11:03:02.000000000")}});
         }
     });
 }
