@@ -48,8 +48,9 @@ shared_ptr<function> castas_functions::get(data_type to_type, const std::vector<
     std::cerr << "XYZ: ToType:" << to_type->name() << "; from-type:" << from_type->name() << std::endl;
 
     auto it_candidate = _declared.find(castas_fcts_key{to_type, from_type_key});
-    if (it_candidate == _declared.end())
+    if (it_candidate == _declared.end()) {
         throw exceptions::invalid_request_exception(sprint("%s cannot be cast to %s", from_type->name(), to_type->name()));
+    }
 
     return it_candidate->second;
 }

@@ -26,6 +26,7 @@
 #include <boost/test/unit_test.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
 
+#include "utils/big_decimal.hh"
 #include "exceptions/exceptions.hh"
 #include "tests/test-utils.hh"
 #include "tests/cql_test_env.hh"
@@ -152,7 +153,6 @@ SEASTAR_TEST_CASE(test_unsupported_conversions) {
 #endif
 
 SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
-    std::cerr << "XYZ: " << __LINE__ << std::endl;
     return do_with_cql_env_thread([&] (auto& e) {
         std::cerr << "XYZ: " << __LINE__ << std::endl;
         e.execute_cql("CREATE TABLE test (a tinyint primary key,"
@@ -165,7 +165,6 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
                       " h varint,"
                       " i int)").get();
 
-        std::cerr << "XYZ: " << __LINE__ << std::endl;
         e.execute_cql("INSERT INTO test (a, b, c, d, e, f, g, h) VALUES (1, 2, 3, 4, 5.2, 6.3, 7.3, 8)").get();
         std::cerr << "Running conversion..." << std::endl;
         {
@@ -178,7 +177,6 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
                                      "CAST(g AS tinyint), "
                                      "CAST(h AS tinyint), "
                                      "CAST(i AS tinyint) FROM test").get0();
-            //std::cerr << "XYZ: [8]: " << (int)value_cast<int8_t>( byte_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[8].value()) ) << ";" << std::endl;
             assert_that(msg).is_rows().with_size(1).with_row({{byte_type->decompose(int8_t(1))},
                                                               {byte_type->decompose(int8_t(2))},
                                                               {byte_type->decompose(int8_t(3))},
@@ -280,7 +278,7 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
                                      "CAST(h AS double), "
                                      "CAST(i AS double) FROM test").get0();
             // Conversions to double cannot be compared with assert_that(), because result
-            //   of double conversions may be slightly different from theoretical values.
+            //   of such conversions may be slightly different from theoretical values.
             auto cmp = [&](::size_t index, double req) {
                 auto row = dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front();
                 auto val = value_cast<double>( double_type->deserialize(row[index].value()) );
@@ -299,9 +297,45 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
             cmp(6, 7.3d);
             cmp(7, 8.d);
             cmp_null(8);
-            /*
-               std::cerr << "XYZ: [0]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[0].value()) ) << ";" << std::endl;
-             */
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS decimal), "
+                                     "CAST(b AS decimal), "
+                                     "CAST(c AS decimal), "
+                                     "CAST(d AS decimal), "
+                                     "CAST(e AS decimal), "
+                                     "CAST(f AS decimal), "
+                                     "CAST(g AS decimal), "
+                                     "CAST(h AS decimal), "
+                                     "CAST(i AS decimal) FROM test").get0();
+        std::cerr << "XYZ: [0]: " << ( decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[0].value()) ) << ";" << std::endl;
+        std::cerr << "XYZ: [1]: " << ( decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[1].value()) ) << ";" << std::endl;
+        std::cerr << "XYZ: [2]: " << ( decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[2].value()) ) << ";" << std::endl;
+        std::cerr << "XYZ: [3]: " << ( decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[3].value()) ) << ";" << std::endl;
+        std::cerr << "XYZ: [4]: " << ( decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[4].value()) ) << ";" << std::endl;
+        std::cerr << "XYZ: [5]: " << ( decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[5].value()) ) << ";" << std::endl;
+        std::cerr << "XYZ: [6]: " << ( decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[6].value()) ) << ";" << std::endl;
+        std::cerr << "XYZ: [7]: " << ( decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[7].value()) ) << ";" << std::endl;
+            // Conversions that include floating points cannot be compared with assert_that(), because result
+            //   of such conversions may be slightly different from theoretical values.
+            auto cmp = [&](::size_t index, double req) {
+                auto row = dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front();
+                auto val = value_cast<big_decimal>( decimal_type->deserialize(row[index].value()) );
+                BOOST_CHECK_CLOSE(boost::lexical_cast<double>(val.to_string()), req, 1e-4);
+            };
+            auto cmp_null = [&](::size_t index) {
+                auto row = dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front();
+                BOOST_CHECK(!row[index]);
+            };
+            cmp(0, 1.d);
+            cmp(1, 2.d);
+            cmp(2, 3.d);
+            cmp(3, 4.d);
+            cmp(4, 5.2d);
+            cmp(5, 6.3d);
+            cmp(6, 7.3d);
+            cmp(7, 8.d);
+            cmp_null(8);
         }
         {
             auto msg = e.execute_cql("SELECT CAST(a AS ascii), "
@@ -345,33 +379,6 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
         }
     });
 }
-
-#if 0
-        assertColumnNames(execute("SELECT CAST(b AS int), CAST(c AS int), CAST(d AS double) FROM %s"),
-                          "cast(b as int)",
-                          "c",
-                          "cast(d as double)");
-
-        assertRows(execute("SELECT CAST(a AS decimal), " +
-                "CAST(b AS decimal), " +
-                "CAST(c AS decimal), " +
-                "CAST(d AS decimal), " +
-                "CAST(e AS decimal), " +
-                "CAST(f AS decimal), " +
-                "CAST(g AS decimal), " +
-                "CAST(h AS decimal), " +
-                "CAST(i AS decimal) FROM %s"),
-                   row(BigDecimal.valueOf(1.0),
-                       BigDecimal.valueOf(2.0),
-                       BigDecimal.valueOf(3.0),
-                       BigDecimal.valueOf(4.0),
-                       BigDecimal.valueOf(5.2F),
-                       BigDecimal.valueOf(6.3),
-                       BigDecimal.valueOf(6.3),
-                       BigDecimal.valueOf(4.0),
-                       null));
-
-#endif
 
 SEASTAR_TEST_CASE(test_time_casts_in_selection_clause) {
     return do_with_cql_env_thread([&] (auto& e) {
@@ -501,5 +508,3 @@ SEASTAR_TEST_CASE(test_casts_with_revrsed_order_in_selection_clause) {
 }
 
 // FIXME: Add test with user-defined functions after they are available.
-
-#endif
