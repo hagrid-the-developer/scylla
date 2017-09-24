@@ -75,6 +75,15 @@ sstring time_to_string(const int64_t nanoseconds_count) {
     return str.str();
 }
 
+sstring boolean_to_string(const bool b) {
+    return b ? "true" : "false";
+}
+
+sstring inet_to_string(const net::ipv4_address &addr) {
+    boost::asio::ip::address_v4 ipv4(addr.ip);
+    return ipv4.to_string();
+}
+
 static const char* byte_type_name      = "org.apache.cassandra.db.marshal.ByteType";
 static const char* short_type_name     = "org.apache.cassandra.db.marshal.ShortType";
 static const char* int32_type_name     = "org.apache.cassandra.db.marshal.Int32Type";
@@ -455,7 +464,7 @@ struct boolean_type_impl : public simple_type_impl<bool> {
         if (b.size() != 1) {
             throw marshal_exception();
         }
-        return *b.begin() ? "true" : "false";
+        return boolean_to_string(*b.begin());
     }
     virtual ::shared_ptr<cql3::cql3_type> as_cql3_type() const override {
         return cql3::cql3_type::boolean;
@@ -1136,8 +1145,7 @@ struct inet_addr_type_impl : concrete_type<net::ipv4_address> {
         if (v.is_null()) {
             return  "";
         }
-        boost::asio::ip::address_v4 ipv4(from_value(v).get().ip);
-        return ipv4.to_string();
+        return inet_to_string(from_value(v).get());
     }
     virtual ::shared_ptr<cql3::cql3_type> as_cql3_type() const override {
         return cql3::cql3_type::inet;
@@ -3541,6 +3549,18 @@ std::function<data_value(data_value)> make_castas_fctn_from_uuid_to_string() {
     };
 }
 
+std::function<data_value(data_value)> make_castas_fctn_from_boolean_to_string() {
+    return [](data_value from) -> data_value {
+        return boolean_to_string(value_cast<bool>(from));
+    };
+}
+
+std::function<data_value(data_value)> make_castas_fctn_from_inet_to_string() {
+    return [](data_value from) -> data_value {
+        return inet_to_string(value_cast<net::ipv4_address>(from));
+    };
+}
+
 } /* Anonymous Namespace */
 
 // Table of castas functions...
@@ -3640,10 +3660,18 @@ thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_f
     { ascii_type, time_type, make_castas_fctn_from_time_to_string() },
     { ascii_type, timeuuid_type, make_castas_fctn_from_uuid_to_string() },
     { ascii_type, uuid_type, make_castas_fctn_from_uuid_to_string() },
+    { ascii_type, boolean_type, make_castas_fctn_from_boolean_to_string() },
+    { ascii_type, inet_addr_type, make_castas_fctn_from_inet_to_string() },
+    { ascii_type, ascii_type, make_castas_fctn_simple<sstring, sstring>() },
 
     { utf8_type, timestamp_type, make_castas_fctn_from_timestamp_to_string() },
     { utf8_type, simple_date_type, make_castas_fctn_from_simple_date_to_string() },
     { utf8_type, time_type, make_castas_fctn_from_time_to_string() },
     { utf8_type, timeuuid_type, make_castas_fctn_from_uuid_to_string() },
     { utf8_type, uuid_type, make_castas_fctn_from_uuid_to_string() },
+    { utf8_type, boolean_type, make_castas_fctn_from_boolean_to_string() },
+    { utf8_type, boolean_type, make_castas_fctn_from_boolean_to_string() },
+    { utf8_type, inet_addr_type, make_castas_fctn_from_inet_to_string() },
+    { utf8_type, ascii_type, make_castas_fctn_simple<sstring, sstring>() },
+    { utf8_type, utf8_type, make_castas_fctn_simple<sstring, sstring>() },
 };
