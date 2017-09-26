@@ -1,3 +1,24 @@
+/*
+ * Copyright (C) 2017 ScyllaDB
+ */
+
+/*
+ * This file is part of Scylla.
+ *
+ * Scylla is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Scylla is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 #include "castas_fcts.hh"
 #include "cql3/functions/native_scalar_function.hh"
 
@@ -6,21 +27,39 @@ namespace functions {
 
 namespace {
 
-using opt_bytes = std::experimental::optional<bytes>;
+using bytes_opt = std::experimental::optional<bytes>;
 
-shared_ptr<function> make_castas_function(data_type to_type, data_type from_type, castas_fctn f) {
-    auto name = "castas" + to_type->as_cql3_type()->to_string();
+class castas_function_for : public cql3::functions::native_scalar_function {
+    castas_fctn _func;
+public:
+    castas_function_for(data_type to_type,
+                        data_type from_type,
+                        castas_fctn func)
+            : native_scalar_function("castas" + to_type->as_cql3_type()->to_string(), to_type, {from_type})
+            , _func(func) {
+    }
+    virtual bool is_pure() override {
+        return true;
+    }
+    virtual void print(std::ostream& os) const override {
+        os << "cast(" << _arg_types[0]->name() << " as " << _return_type->name() << ")";
+    }
+    virtual bytes_opt execute(cql_serialization_format sf, const std::vector<bytes_opt>& parameters) override {
+        auto from_type = arg_types()[0];
+        auto to_type = return_type();
 
-    return cql3::functions::make_native_scalar_function<true>(name, to_type, { from_type },
-        [from_type, to_type, f] (cql_serialization_format sf, const std::vector<bytes_opt>& parameters) -> opt_bytes {
         auto&& val = parameters[0];
         if (!val) {
             return val;
         }
         auto val_from = from_type->deserialize(*val);
-        auto val_to = f(val_from);
+        auto val_to = _func(val_from);
         return to_type->decompose(val_to);
-    });
+    }
+};
+
+shared_ptr<function> make_castas_function(data_type to_type, data_type from_type, castas_fctn func) {
+    return ::make_shared<castas_function_for>(std::move(to_type), std::move(from_type), std::move(func));
 }
 
 } /* Anonymous Namespace */
@@ -28,7 +67,7 @@ shared_ptr<function> make_castas_function(data_type to_type, data_type from_type
 thread_local castas_functions::castas_fcts_map castas_functions::_declared = castas_functions::init();
 castas_functions::castas_fcts_map castas_functions::init() {
     castas_fcts_map ret;
-    for (auto item: castas_fctns) {
+    for (auto item: get_castas_fctns()) {
         auto to_type = std::get<0>(item);
         auto from_type = std::get<1>(item);
         auto f = std::get<2>(item);

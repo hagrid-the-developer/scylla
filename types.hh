@@ -1658,4 +1658,4 @@ struct appending_hash<data_type> {
  */
 
 using castas_fctn = std::function<data_value(data_value)>;
-extern thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_fctns;
+const std::vector<std::tuple<data_type, data_type, castas_fctn>>& get_castas_fctns();

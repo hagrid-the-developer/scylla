@@ -113,8 +113,6 @@ public:
     };
 };
 
-// XYZ: We store sql3_type since we allow only native_type to be in CAST statement
-// XYZ:   Is it conformant with the C* ?
 class selectable::with_cast : public selectable {
     ::shared_ptr<selectable> _arg;
     ::shared_ptr<cql3_type> _type;

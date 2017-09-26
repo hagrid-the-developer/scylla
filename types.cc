@@ -80,7 +80,7 @@ sstring boolean_to_string(const bool b) {
     return b ? "true" : "false";
 }
 
-sstring inet_to_string(const net::ipv4_address &addr) {
+sstring inet_to_string(const net::ipv4_address& addr) {
     boost::asio::ip::address_v4 ipv4(addr.ip);
     return ipv4.to_string();
 }
@@ -3404,7 +3404,7 @@ std::ostream& operator<<(std::ostream& out, const data_value& v) {
  */
 namespace {
 
-using opt_bytes = std::experimental::optional<bytes>;
+using bytes_opt = std::experimental::optional<bytes>;
 
 template<typename ToType, typename FromType>
 std::function<data_value(data_value)> make_castas_fctn_simple() {
@@ -3473,7 +3473,7 @@ db_clock::time_point millis_to_time_point(const int64_t millis) {
     return db_clock::time_point{std::chrono::milliseconds(millis)};
 }
 
-uint32_t time_point_to_date(const db_clock::time_point &tp) {
+uint32_t time_point_to_date(const db_clock::time_point& tp) {
     const auto epoch = boost::posix_time::from_time_t(0);
     auto timestamp = tp.time_since_epoch().count();
     auto time = boost::posix_time::from_time_t(0) + boost::posix_time::milliseconds(timestamp);
@@ -3493,7 +3493,7 @@ db_clock::time_point date_to_time_point(const uint32_t date) {
 /*
  * Converts db_clock::time_point to the number of nanoseconds since midnight.
  */
-int64_t time_point_to_time(const db_clock::time_point &tp) {
+int64_t time_point_to_time(const db_clock::time_point& tp) {
         const auto epoch = boost::posix_time::from_time_t(0);
         const auto time = epoch + boost::posix_time::milliseconds(tp.time_since_epoch().count());
         auto ptime_midnight = boost::posix_time::ptime(time.date(), boost::posix_time::time_duration{});
@@ -3581,9 +3581,9 @@ std::function<data_value(data_value)> make_castas_fctn_from_inet_to_string() {
     };
 }
 
-} /* Anonymous Namespace */
+// FIXME: Add conversions for counters, after they are fully implemented...
 
-// Table of castas functions...
+// List of supported castas functions...
 thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_fctns = {
     { byte_type, byte_type, make_castas_fctn_simple<int8_t, int8_t>() },
     { byte_type, short_type, make_castas_fctn_simple<int8_t, int16_t>() },
@@ -3704,3 +3704,9 @@ thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_f
     { utf8_type, ascii_type, make_castas_fctn_simple<sstring, sstring>() },
     { utf8_type, utf8_type, make_castas_fctn_simple<sstring, sstring>() },
 };
+
+} /* Anonymous Namespace */
+
+const std::vector<std::tuple<data_type, data_type, castas_fctn>>& get_castas_fctns() {
+    return castas_fctns;
+}
