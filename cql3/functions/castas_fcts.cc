@@ -64,18 +64,6 @@ shared_ptr<function> make_castas_function(data_type to_type, data_type from_type
 
 } /* Anonymous Namespace */
 
-thread_local castas_functions::castas_fcts_map castas_functions::_declared = castas_functions::init();
-castas_functions::castas_fcts_map castas_functions::init() {
-    castas_fcts_map ret;
-    for (auto item: get_castas_fctns()) {
-        auto to_type = std::get<0>(item);
-        auto from_type = std::get<1>(item);
-        auto f = std::get<2>(item);
-        ret.emplace(std::make_pair(std::make_tuple(to_type, from_type), make_castas_function(to_type, from_type, f)));
-    }
-    return ret;
-}
-
 shared_ptr<function> castas_functions::get(data_type to_type, const std::vector<shared_ptr<cql3::selection::selector>>& provided_args, schema_ptr s) {
     if (provided_args.size() != 1)
         throw exceptions::invalid_request_exception("Invalid CAST expression");
@@ -86,12 +74,13 @@ shared_ptr<function> castas_functions::get(data_type to_type, const std::vector<
     }
     std::cerr << "XYZ: ToType:" << to_type->name() << "; from-type:" << from_type->name() << std::endl;
 
-    auto it_candidate = _declared.find(castas_fcts_key{to_type, from_type_key});
-    if (it_candidate == _declared.end()) {
+    auto castas_fctns = get_castas_fctns();
+    auto it_candidate = castas_fctns.find(castas_fctn_key{to_type, from_type_key});
+    if (it_candidate == castas_fctns.end()) {
         throw exceptions::invalid_request_exception(sprint("%s cannot be cast to %s", from_type->name(), to_type->name()));
     }
 
-    return it_candidate->second;
+    return make_castas_function(to_type, from_type, it_candidate->second);
 }
 
 }
