@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "version.hh"
+#include "shared_sstable.hh"
 #include "core/file.hh"
 #include "core/fstream.hh"
 #include "core/future.hh"
@@ -29,6 +31,7 @@
 #include "core/enum.hh"
 #include "core/shared_ptr.hh"
 #include "core/distributed.hh"
+#include <seastar/core/shared_ptr_incomplete.hh>
 #include <unordered_set>
 #include <unordered_map>
 #include "types.hh"
@@ -51,6 +54,7 @@
 #include "disk-error-handler.hh"
 #include "atomic_deletion.hh"
 #include "sstables/shared_index_lists.hh"
+#include "sstables/progress_monitor.hh"
 #include "db/commitlog/replay_position.hh"
 
 namespace seastar {
@@ -130,20 +134,6 @@ struct sstable_open_info;
 
 class index_reader;
 
-class write_monitor {
-public:
-    virtual ~write_monitor() { }
-    virtual void on_write_completed() = 0;
-    virtual void on_flush_completed() = 0;
-};
-
-struct noop_write_monitor final : public write_monitor {
-    virtual void on_write_completed() override { }
-    virtual void on_flush_completed() override { }
-};
-
-seastar::shared_ptr<write_monitor> default_write_monitor();
-
 struct sstable_writer_config {
     std::experimental::optional<size_t> promoted_index_block_size;
     uint64_t max_sstable_size = std::numeric_limits<uint64_t>::max();
@@ -153,6 +143,13 @@ struct sstable_writer_config {
     seastar::thread_scheduling_group* thread_scheduling_group = nullptr;
     seastar::shared_ptr<write_monitor> monitor = default_write_monitor();
 };
+
+static constexpr inline size_t default_sstable_buffer_size() {
+    return 128 * 1024;
+}
+
+shared_sstable make_sstable(schema_ptr schema, sstring dir, int64_t generation, sstable_version_types v, sstable_format_types f, gc_clock::time_point now = gc_clock::now(),
+            io_error_handler_gen error_handler_gen = default_io_error_handler_gen(), size_t buffer_size = default_sstable_buffer_size());
 
 class sstable : public enable_lw_shared_from_this<sstable> {
 public:
@@ -171,9 +168,9 @@ public:
         Scylla,
         Unknown,
     };
-    enum class version_types { ka, la };
-    enum class format_types { big };
-    static const size_t default_buffer_size = 128*1024;
+    using version_types = sstable_version_types;
+    using format_types = sstable_format_types;
+    static const size_t default_buffer_size = default_sstable_buffer_size();
 public:
     sstable(schema_ptr schema, sstring dir, int64_t generation, version_types v, format_types f, gc_clock::time_point now = gc_clock::now(),
             io_error_handler_gen error_handler_gen = default_io_error_handler_gen(), size_t buffer_size = default_buffer_size)
@@ -633,6 +630,10 @@ public:
 
     future<> read_toc();
 
+    bool has_scylla_component() const {
+        return has_component(component_type::Scylla);
+    }
+
     bool filter_has_key(const key& key) {
         return _components->filter->is_present(bytes_view(key));
     }
@@ -736,9 +737,6 @@ public:
     friend class mutation_reader::impl;
 };
 
-using shared_sstable = lw_shared_ptr<sstable>;
-using sstable_list = std::unordered_set<shared_sstable>;
-
 struct entry_descriptor {
     sstring ks;
     sstring cf;
@@ -785,6 +783,9 @@ future<> delete_atomically(std::vector<sstable_to_delete> ssts);
 
 // Cancel any deletions scheduled by delete_atomically() and make their
 // futures complete (with an atomic_deletion_cancelled exception).
+void cancel_prior_atomic_deletions();
+
+// Like cancel_prior_atomic_deletions(), but will also cause any later deletion attempts to fail.
 void cancel_atomic_deletions();
 
 class components_writer {

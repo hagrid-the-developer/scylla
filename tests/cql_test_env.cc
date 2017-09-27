@@ -21,6 +21,7 @@
 
 #include <seastar/core/thread.hh>
 #include <seastar/util/defer.hh>
+#include <sstables/sstables.hh>
 #include "core/do_with.hh"
 #include "cql_test_env.hh"
 #include "cql3/query_processor.hh"
@@ -43,6 +44,12 @@
 #include "gms/gossiper.hh"
 #include "service/storage_service.hh"
 #include "auth/auth.hh"
+
+namespace sstables {
+
+future<> await_background_jobs_on_all_shards();
+
+}
 
 static future<> tst_init_ms_fd_gossiper(db::seed_provider_type seed_provider, sstring cluster_name = "Test Cluster") {
     return gms::get_failure_detector().start().then([seed_provider, cluster_name] {
@@ -290,7 +297,10 @@ public:
             auto stop_storage_service = defer([&ss] { ss.stop().get(); });
 
             db->start(std::move(*cfg)).get();
-            auto stop_db = defer([db] { db->stop().get(); });
+            auto stop_db = defer([db] {
+                db->stop().get();
+                sstables::cancel_prior_atomic_deletions();
+            });
 
             // FIXME: split
             tst_init_ms_fd_gossiper(db::config::seed_provider_type()).get();
@@ -298,6 +308,10 @@ public:
                 gms::get_gossiper().stop().get();
                 gms::get_failure_detector().stop().get();
             });
+
+            ss.invoke_on_all([] (auto&& ss) {
+                ss.enable_all_features();
+            }).get();
 
             distributed<service::storage_proxy>& proxy = service::get_storage_proxy();
             distributed<service::migration_manager>& mm = service::get_migration_manager();
@@ -342,9 +356,7 @@ public:
             env.start().get();
             auto stop_env = defer([&env] { env.stop().get(); });
 
-            try {
-                env.local_db().find_keyspace(ks_name);
-            } catch (const no_such_keyspace&) {
+            if (!env.local_db().has_keyspace(ks_name)) {
                 env.create_keyspace(ks_name).get();
             }
 

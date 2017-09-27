@@ -187,7 +187,7 @@ protected:
     shared_ptr<storage_proxy> _proxy;
     tracing::trace_state_ptr _trace_state;
     db::consistency_level _cl;
-    keyspace& _ks;
+    size_t _total_block_for = 0;
     db::write_type _type;
     std::unique_ptr<mutation_holder> _mutation_holder;
     std::unordered_set<gms::inet_address> _targets; // who we sent this mutation to
@@ -201,12 +201,6 @@ protected:
     bool _timedout = false;
     bool _throttled = false;
 protected:
-    size_t total_block_for() {
-        // original comment from cassandra:
-        // during bootstrap, include pending endpoints in the count
-        // or we may fail the consistency level guarantees (see #833, #8058)
-        return db::block_for(_ks, _cl) + _pending_endpoints;
-    }
     virtual void signal(gms::inet_address from) {
         signal();
     }
@@ -214,8 +208,12 @@ public:
     abstract_write_response_handler(shared_ptr<storage_proxy> p, keyspace& ks, db::consistency_level cl, db::write_type type,
             std::unique_ptr<mutation_holder> mh, std::unordered_set<gms::inet_address> targets, tracing::trace_state_ptr trace_state,
             size_t pending_endpoints = 0, std::vector<gms::inet_address> dead_endpoints = {})
-            : _id(p->_next_response_id++), _proxy(std::move(p)), _trace_state(trace_state), _cl(cl), _ks(ks), _type(type), _mutation_holder(std::move(mh)), _targets(std::move(targets)),
+            : _id(p->_next_response_id++), _proxy(std::move(p)), _trace_state(trace_state), _cl(cl), _type(type), _mutation_holder(std::move(mh)), _targets(std::move(targets)),
               _pending_endpoints(pending_endpoints), _dead_endpoints(std::move(dead_endpoints)) {
+        // original comment from cassandra:
+        // during bootstrap, include pending endpoints in the count
+        // or we may fail the consistency level guarantees (see #833, #8058)
+        _total_block_for = db::block_for(ks, _cl) + _pending_endpoints;
         ++_proxy->_stats.writes;
     }
     virtual ~abstract_write_response_handler() {
@@ -229,7 +227,7 @@ public:
                 _proxy->unthrottle();
             }
         } else if (_timedout) {
-            _ready.set_exception(mutation_write_timeout_exception(get_schema()->ks_name(), get_schema()->cf_name(), _cl, _cl_acks, total_block_for(), _type));
+            _ready.set_exception(mutation_write_timeout_exception(get_schema()->ks_name(), get_schema()->cf_name(), _cl, _cl_acks, _total_block_for, _type));
         }
     };
     bool is_counter() const {
@@ -243,7 +241,7 @@ public:
     }
     void signal(size_t nr = 1) {
         _cl_acks += nr;
-        if (!_cl_achieved && _cl_acks >= total_block_for()) {
+        if (!_cl_achieved && _cl_acks >= _total_block_for) {
              _cl_achieved = true;
              if (_proxy->need_throttle_writes()) {
                  _throttled = true;
@@ -2680,6 +2678,10 @@ public:
 
         return _result_promise.get_future();
     }
+
+    lw_shared_ptr<column_family>& get_cf() {
+        return _cf;
+    }
 };
 
 class never_speculating_read_executor : public abstract_read_executor {
@@ -2722,8 +2724,7 @@ public:
         });
         auto& sr = _schema->speculative_retry();
         auto t = (sr.get_type() == speculative_retry::type::PERCENTILE) ?
-            // FIXME: the timeout should come from previous latency statistics for a partition
-            std::chrono::milliseconds(_proxy->get_db().local().get_config().read_request_timeout_in_ms()/2) :
+            std::min(_cf->get_coordinator_read_latency_percentile(sr.get_value()), std::chrono::milliseconds(_proxy->get_db().local().get_config().read_request_timeout_in_ms()/2)) :
             std::chrono::milliseconds(unsigned(sr.get_value()));
         _speculate_timer.arm(t);
 
@@ -2900,7 +2901,13 @@ storage_proxy::query_singular(lw_shared_ptr<query::read_command> cmd, dht::parti
     merger.reserve(exec.size());
 
     auto f = ::map_reduce(exec.begin(), exec.end(), [timeout] (::shared_ptr<abstract_read_executor>& rex) {
-        return rex->execute(timeout);
+        utils::latency_counter lc;
+        lc.start();
+        return rex->execute(timeout).finally([lc, rex] () mutable {
+            if (lc.is_start()) {
+                rex->get_cf()->add_coordinator_read_latency(lc.stop().latency());
+            }
+        });
     }, std::move(merger));
 
     return f.handle_exception([exec = std::move(exec), p = shared_from_this()] (std::exception_ptr eptr) {
@@ -3021,7 +3028,7 @@ storage_proxy::query_partition_key_range_concurrent(storage_proxy::clock_type::t
             cmd->row_limit = remaining_row_count;
             cmd->partition_limit = remaining_partition_count;
             return p->query_partition_key_range_concurrent(timeout, std::move(results), cmd, cl, std::move(i),
-                    std::move(ranges), concurrency_factor, std::move(trace_state), remaining_row_count, remaining_partition_count);
+                    std::move(ranges), concurrency_factor * 2, std::move(trace_state), remaining_row_count, remaining_partition_count);
         }
     }).handle_exception([p] (std::exception_ptr eptr) {
         p->handle_read_error(eptr, true);
@@ -3042,7 +3049,7 @@ storage_proxy::query_partition_key_range(lw_shared_ptr<query::read_command> cmd,
         ranges = std::move(partition_ranges);
     } else {
         for (auto&& r : partition_ranges) {
-            auto restricted_ranges = get_restricted_ranges(ks, *schema, std::move(r));
+            auto restricted_ranges = get_restricted_ranges(*schema, std::move(r));
             std::move(restricted_ranges.begin(), restricted_ranges.end(), std::back_inserter(ranges));
         }
     }
@@ -3316,7 +3323,7 @@ float storage_proxy::estimate_result_rows_per_range(lw_shared_ptr<query::read_co
  * so we need to restrict each scan to the specific range we want, or else we'd get duplicate results.
  */
 dht::partition_range_vector
-storage_proxy::get_restricted_ranges(keyspace& ks, const schema& s, dht::partition_range range) {
+storage_proxy::get_restricted_ranges(const schema& s, dht::partition_range range) {
     locator::token_metadata& tm = get_local_storage_service().get_token_metadata();
     return service::get_restricted_ranges(tm, s, std::move(range));
 }

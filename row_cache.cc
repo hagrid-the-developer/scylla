@@ -76,7 +76,6 @@ cache_tracker::cache_tracker() {
             evict_last(_lru);
             --_stats.partitions;
             ++_stats.partition_evictions;
-            ++_stats.modification_count;
             return memory::reclaiming_result::reclaimed_something;
            } catch (std::bad_alloc&) {
             // Bad luck, linearization during partition removal caused us to
@@ -139,7 +138,7 @@ void cache_tracker::clear() {
     });
     _stats.partition_removals += _stats.partitions;
     _stats.partitions = 0;
-    ++_stats.modification_count;
+    allocator().invalidate_references();
 }
 
 void cache_tracker::touch(cache_entry& e) {
@@ -153,14 +152,13 @@ void cache_tracker::touch(cache_entry& e) {
 void cache_tracker::insert(cache_entry& entry) {
     ++_stats.partition_insertions;
     ++_stats.partitions;
-    ++_stats.modification_count;
     _lru.push_front(entry);
 }
 
 void cache_tracker::on_erase() {
     --_stats.partitions;
     ++_stats.partition_removals;
-    ++_stats.modification_count;
+    allocator().invalidate_references();
 }
 
 void cache_tracker::on_merge() {
@@ -219,7 +217,6 @@ class partition_range_cursor final {
     dht::ring_position_view _end_pos;
     stdx::optional<dht::decorated_key> _last;
     uint64_t _last_reclaim_count;
-    size_t _last_modification_count;
 private:
     void set_position(cache_entry& e) {
         // FIXME: make ring_position_view convertible to ring_position, so we can use e.position()
@@ -240,7 +237,6 @@ public:
         , _start_pos(dht::ring_position_view::for_range_start(range))
         , _end_pos(dht::ring_position_view::for_range_end(range))
         , _last_reclaim_count(std::numeric_limits<uint64_t>::max())
-        , _last_modification_count(std::numeric_limits<size_t>::max())
     { }
 
     // Ensures that cache entry reference is valid.
@@ -248,10 +244,8 @@ public:
     // Returns true if and only if the position of the cursor changed.
     // Strong exception guarantees.
     bool refresh() {
-        auto reclaim_count = _cache.get().get_cache_tracker().region().reclaim_counter();
-        auto modification_count = _cache.get().get_cache_tracker().modification_count();
-
-        if (reclaim_count == _last_reclaim_count && modification_count == _last_modification_count) {
+        auto reclaim_count = _cache.get().get_cache_tracker().allocator().invalidate_counter();
+        if (reclaim_count == _last_reclaim_count) {
             return true;
         }
 
@@ -264,7 +258,6 @@ public:
         auto same = !cmp(_start_pos, _it->position());
         set_position(*_it);
         _last_reclaim_count = reclaim_count;
-        _last_modification_count = modification_count;
         return same;
     }
 
@@ -702,6 +695,7 @@ void row_cache::populate(const mutation& m, const previous_entry_pointer* previo
                 m.schema(), m.decorated_key(), m.partition());
         upgrade_entry(*entry);
         _tracker.insert(*entry);
+        entry->set_continuous(i->continuous());
         return _partitions.insert(i, *entry);
     }, [&] (auto i) {
         throw std::runtime_error(sprint("cache already contains entry for {}", m.key()));
@@ -728,6 +722,30 @@ row_cache::snapshot_and_phase row_cache::snapshot_of(dht::ring_position_view pos
     return {*_prev_snapshot, _underlying_phase - 1};
 }
 
+void row_cache::invalidate_sync(memtable& m) noexcept {
+    with_allocator(_tracker.allocator(), [&m, this] () {
+        logalloc::reclaim_lock _(_tracker.region());
+        bool blow_cache = false;
+        // Note: clear_and_dispose() ought not to look up any keys, so it doesn't require
+        // with_linearized_managed_bytes(), but invalidate() does.
+        m.partitions.clear_and_dispose([this, deleter = current_deleter<memtable_entry>(), &blow_cache] (memtable_entry* entry) {
+            with_linearized_managed_bytes([&] {
+                try {
+                    invalidate_locked(entry->key());
+                } catch (...) {
+                    blow_cache = true;
+                }
+                deleter(entry);
+            });
+        });
+        if (blow_cache) {
+            // We failed to invalidate the key, presumably due to with_linearized_managed_bytes()
+            // running out of memory.  Recover using clear_now(), which doesn't throw.
+            clear_now();
+        }
+    });
+}
+
 row_cache::phase_type row_cache::phase_of(dht::ring_position_view pos) {
     dht::ring_position_less_comparator less(*_schema);
     if (!_prev_snapshot_pos || less(pos, *_prev_snapshot_pos)) {
@@ -737,46 +755,27 @@ row_cache::phase_type row_cache::phase_of(dht::ring_position_view pos) {
 }
 
 template <typename Updater>
-future<> row_cache::do_update(memtable& m, Updater updater) {
+future<> row_cache::do_update(external_updater eu, memtable& m, Updater updater) {
+  return do_update(std::move(eu), [this, &m, updater = std::move(updater)] {
     m.on_detach_from_region_group();
     _tracker.region().merge(m); // Now all data in memtable belongs to cache
+    STAP_PROBE(scylla, row_cache_update_start);
+    auto cleanup = defer([&m, this] {
+        invalidate_sync(m);
+        STAP_PROBE(scylla, row_cache_update_end);
+    });
     auto attr = seastar::thread_attributes();
     attr.scheduling_group = &_update_thread_scheduling_group;
-    STAP_PROBE(scylla, row_cache_update_start);
     auto t = seastar::thread(attr, [this, &m, updater = std::move(updater)] () mutable {
-        auto cleanup = defer([&] {
-            with_allocator(_tracker.allocator(), [&m, this] () {
-                logalloc::reclaim_lock _(_tracker.region());
-                bool blow_cache = false;
-                // Note: clear_and_dispose() ought not to look up any keys, so it doesn't require
-                // with_linearized_managed_bytes(), but invalidate() does.
-                m.partitions.clear_and_dispose([this, deleter = current_deleter<memtable_entry>(), &blow_cache] (memtable_entry* entry) {
-                  with_linearized_managed_bytes([&] {
-                   try {
-                    invalidate_locked(entry->key());
-                   } catch (...) {
-                    blow_cache = true;
-                   }
-                   deleter(entry);
-                  });
-                });
-                if (blow_cache) {
-                    // We failed to invalidate the key, presumably due to with_linearized_managed_bytes()
-                    // running out of memory.  Recover using clear_now(), which doesn't throw.
-                    clear_now();
-                }
-            });
-        });
-        auto permit = get_units(_update_sem, 1).get0();
-        ++_underlying_phase;
-        _prev_snapshot = std::exchange(_underlying, _snapshot_source());
-        _prev_snapshot_pos = dht::ring_position::min();
-        auto cleanup_prev_snapshot = defer([this] {
+        // In case updater fails, we must bring the cache to consistency without deferring.
+        auto cleanup = defer([&m, this] {
+            invalidate_sync(m);
             _prev_snapshot_pos = {};
             _prev_snapshot = {};
         });
+        partition_presence_checker is_present = _prev_snapshot->make_partition_presence_checker();
         while (!m.partitions.empty()) {
-            with_allocator(_tracker.allocator(), [this, &m, &updater] () {
+            with_allocator(_tracker.allocator(), [&] () {
                 unsigned quota = 30;
                 auto cmp = cache_entry::compare(_schema);
                 {
@@ -794,7 +793,7 @@ future<> row_cache::do_update(memtable& m, Updater updater) {
                             memtable_entry& mem_e = *i;
                             // FIXME: Optimize knowing we lookup in-order.
                             auto cache_i = _partitions.lower_bound(mem_e.key(), cmp);
-                            updater(cache_i, mem_e);
+                            updater(cache_i, mem_e, is_present);
                             i = m.partitions.erase(i);
                             current_allocator().destroy(&mem_e);
                             --quota;
@@ -819,14 +818,15 @@ future<> row_cache::do_update(memtable& m, Updater updater) {
             seastar::thread::yield();
         }
     });
-    STAP_PROBE(scylla, row_cache_update_end);
     return do_with(std::move(t), [] (seastar::thread& t) {
         return t.join();
-    });
+    }).then([cleanup = std::move(cleanup)] {});
+  });
 }
 
-future<> row_cache::update(memtable& m, partition_presence_checker is_present) {
-    return do_update(m, [this, is_present = std::move(is_present)] (row_cache::partitions_type::iterator cache_i, memtable_entry& mem_e) mutable {
+future<> row_cache::update(external_updater eu, memtable& m) {
+    return do_update(std::move(eu), m, [this] (row_cache::partitions_type::iterator cache_i, memtable_entry& mem_e,
+            partition_presence_checker& is_present) mutable {
         // If cache doesn't contain the entry we cannot insert it because the mutation may be incomplete.
         // FIXME: keep a bitmap indicating which sstables we do cover, so we don't have to
         //        search it.
@@ -846,14 +846,17 @@ future<> row_cache::update(memtable& m, partition_presence_checker is_present) {
     });
 }
 
-future<> row_cache::update_invalidating(memtable& m) {
-    return do_update(m, [this] (row_cache::partitions_type::iterator cache_i, memtable_entry& mem_e) {
+future<> row_cache::update_invalidating(external_updater eu, memtable& m) {
+    return do_update(std::move(eu), m, [this] (row_cache::partitions_type::iterator cache_i, memtable_entry& mem_e,
+            partition_presence_checker& is_present) {
         if (cache_i != partitions_end() && cache_i->key().equal(*_schema, mem_e.key())) {
             // FIXME: Invalidate only affected row ranges.
             // This invalidates all row ranges and the static row, leaving only the partition tombstone continuous,
             // which has to always be continuous.
             cache_entry& e = *cache_i;
-            e.partition() = partition_entry(mutation_partition::make_incomplete(*e.schema(), mem_e.partition().partition_tombstone()));
+            e.partition().evict(); // FIXME: evict gradually
+            upgrade_entry(e);
+            e.partition().apply_to_incomplete(*_schema, std::move(mem_e.partition()), *mem_e.schema());
         } else {
             _tracker.clear_continuity(*cache_i);
         }
@@ -889,26 +892,25 @@ void row_cache::invalidate_locked(const dht::decorated_key& dk) {
     }
 }
 
-future<> row_cache::invalidate(const dht::decorated_key& dk) {
-    return invalidate(dht::partition_range::make_singular(dk));
+future<> row_cache::invalidate(external_updater eu, const dht::decorated_key& dk) {
+    return invalidate(std::move(eu), dht::partition_range::make_singular(dk));
 }
 
-future<> row_cache::invalidate(const dht::partition_range& range) {
-    return invalidate(dht::partition_range_vector({range}));
+future<> row_cache::invalidate(external_updater eu, const dht::partition_range& range) {
+    return invalidate(std::move(eu), dht::partition_range_vector({range}));
 }
 
-future<> row_cache::invalidate(dht::partition_range_vector&& ranges) {
-  return get_units(_update_sem, 1).then([this, ranges = std::move(ranges)] (auto permit) mutable {
-      _underlying = _snapshot_source();
-      ++_underlying_phase;
-      auto on_failure = defer([this] { this->clear_now(); });
-      with_linearized_managed_bytes([&] {
-          for (auto&& range : ranges) {
-              this->invalidate_unwrapped(range);
-          }
-      });
-      on_failure.cancel();
-  });
+future<> row_cache::invalidate(external_updater eu, dht::partition_range_vector&& ranges) {
+    return do_update(std::move(eu), [this, ranges = std::move(ranges)] {
+        auto on_failure = defer([this] { this->clear_now(); });
+        with_linearized_managed_bytes([&] {
+            for (auto&& range : ranges) {
+                this->invalidate_unwrapped(range);
+            }
+        });
+        on_failure.cancel();
+        return make_ready_future<>();
+    });
 }
 
 void row_cache::evict(const dht::partition_range& range) {
@@ -931,16 +933,17 @@ void row_cache::invalidate_unwrapped(const dht::partition_range& range) {
     });
 }
 
-row_cache::row_cache(schema_ptr s, snapshot_source src, cache_tracker& tracker)
+row_cache::row_cache(schema_ptr s, snapshot_source src, cache_tracker& tracker, is_continuous cont)
     : _tracker(tracker)
     , _schema(std::move(s))
     , _partitions(cache_entry::compare(_schema))
     , _underlying(src())
     , _snapshot_source(std::move(src))
 {
-    with_allocator(_tracker.allocator(), [this] {
+    with_allocator(_tracker.allocator(), [this, cont] {
         cache_entry* entry = current_allocator().construct<cache_entry>(cache_entry::dummy_entry_tag());
         _partitions.insert(*entry);
+        entry->set_continuous(bool(cont));
     });
 }
 
@@ -965,6 +968,10 @@ cache_entry::cache_entry(cache_entry&& o) noexcept
     }
 }
 
+cache_entry::~cache_entry() {
+    _pe.evict();
+}
+
 void row_cache::set_schema(schema_ptr new_schema) noexcept {
     _schema = std::move(new_schema);
 }
@@ -983,7 +990,7 @@ streamed_mutation cache_entry::read(row_cache& rc, read_context& reader,
 
 // Assumes reader is in the corresponding partition
 streamed_mutation cache_entry::do_read(row_cache& rc, read_context& reader) {
-    auto snp = _pe.read(_schema, reader.phase());
+    auto snp = _pe.read(rc._tracker.region(), _schema, reader.phase());
     auto ckr = query::clustering_key_filter_ranges::get_ranges(*_schema, reader.slice(), _key.key());
     auto sm = make_cache_streamed_mutation(_schema, _key, std::move(ckr), rc, reader.shared_from_this(), std::move(snp));
     if (reader.schema()->version() != _schema->version()) {
@@ -1017,6 +1024,29 @@ std::ostream& operator<<(std::ostream& out, row_cache& rc) {
         out << "{row_cache: " << ::join(", ", rc._partitions.begin(), rc._partitions.end()) << "}";
     });
     return out;
+}
+
+future<> row_cache::do_update(row_cache::external_updater eu, row_cache::internal_updater iu) noexcept {
+    return futurize_apply([this] {
+        return get_units(_update_sem, 1);
+    }).then([this, eu = std::move(eu), iu = std::move(iu)] (auto permit) mutable {
+        auto pos = dht::ring_position::min();
+        eu();
+        [&] () noexcept {
+            _prev_snapshot_pos = std::move(pos);
+            _prev_snapshot = std::exchange(_underlying, _snapshot_source());
+            ++_underlying_phase;
+        }();
+        return futurize_apply([&iu] {
+            return iu();
+        }).then_wrapped([this, permit = std::move(permit)] (auto f) {
+            _prev_snapshot_pos = {};
+            _prev_snapshot = {};
+            if (f.failed()) {
+                clogger.warn("Failure during cache update: {}", f.get_exception());
+            }
+        });
+    });
 }
 
 std::ostream& operator<<(std::ostream& out, cache_entry& e) {

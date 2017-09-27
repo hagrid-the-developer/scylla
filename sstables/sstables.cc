@@ -36,6 +36,7 @@
 
 #include "types.hh"
 #include "sstables.hh"
+#include "progress_monitor.hh"
 #include "compress.hh"
 #include "unimplemented.hh"
 #include "index_reader.hh"
@@ -57,6 +58,7 @@
 #include "range_tombstone_list.hh"
 #include "counters.hh"
 #include "binary_search.hh"
+#include "utils/bloom_filter.hh"
 
 #include "checked-file-impl.hh"
 #include "integrity_checked_file_impl.hh"
@@ -167,6 +169,13 @@ public:
         });
     }
 };
+
+shared_sstable
+make_sstable(schema_ptr schema, sstring dir, int64_t generation, sstable_version_types v, sstable_format_types f, gc_clock::time_point now,
+            io_error_handler_gen error_handler_gen, size_t buffer_size) {
+    // safe, since shared_from_this() takes ownership
+    return (new sstable(std::move(schema), std::move(dir), generation, v, f, now, std::move(error_handler_gen), buffer_size))->shared_from_this();
+}
 
 std::unordered_map<sstable::version_types, sstring, enum_hash<sstable::version_types>> sstable::_version_string = {
     { sstable::version_types::ka , "ka" },
@@ -1344,6 +1353,35 @@ future<> sstable::create_data() {
     });
 }
 
+future<> sstable::read_filter(const io_priority_class& pc) {
+    if (!has_component(sstable::component_type::Filter)) {
+        _components->filter = std::make_unique<utils::filter::always_present_filter>();
+        return make_ready_future<>();
+    }
+
+    return do_with(sstables::filter(), [this, &pc] (auto& filter) {
+        return this->read_simple<sstable::component_type::Filter>(filter, pc).then([this, &filter] {
+            large_bitset bs(filter.buckets.elements.size() * 64);
+            bs.load(filter.buckets.elements.begin(), filter.buckets.elements.end());
+            _components->filter = utils::filter::create_filter(filter.hashes, std::move(bs));
+        });
+    });
+}
+
+void sstable::write_filter(const io_priority_class& pc) {
+    if (!has_component(sstable::component_type::Filter)) {
+        return;
+    }
+
+    auto f = static_cast<utils::filter::murmur3_bloom_filter *>(_components->filter.get());
+
+    auto&& bs = f->bits();
+    utils::chunked_vector<uint64_t> v(align_up(bs.size(), size_t(64)) / 64);
+    bs.save(v.begin());
+    auto filter = sstables::filter(f->num_hashes(), std::move(v));
+    write_simple<sstable::component_type::Filter>(filter, pc);
+}
+
 // This interface is only used during tests, snapshot loading and early initialization.
 // No need to set tunable priorities for it.
 future<> sstable::load(const io_priority_class& pc) {
@@ -1373,7 +1411,7 @@ future<> sstable::load(sstables::foreign_sstable_open_info info) {
 
 future<sstable_open_info> sstable::load_shared_components(const schema_ptr& s, sstring dir, int generation, version_types v, format_types f,
         const io_priority_class& pc) {
-    auto sst = make_lw_shared<sstables::sstable>(s, dir, generation, v, f);
+    auto sst = sstables::make_sstable(s, dir, generation, v, f);
     return sst->load(pc).then([sst] () mutable {
         auto shards = sst->get_shards_for_this_sstable();
         auto info = sstable_open_info{make_lw_shared<shareable_components>(std::move(*sst->_components)),
@@ -1578,11 +1616,20 @@ void sstable::write_cell(file_writer& out, atomic_cell_view cell, const column_d
         for (auto i = 0u; i < shard_count; i++) {
             write<int16_t>(out, std::numeric_limits<int16_t>::min() + i);
         }
-        for (auto&& s : ccv.shards()) {
+        auto write_shard = [&] (auto&& s) {
             auto uuid = s.id().to_uuid();
             write(out, int64_t(uuid.get_most_significant_bits()),
                   int64_t(uuid.get_least_significant_bits()),
                   int64_t(s.logical_clock()), int64_t(s.value()));
+        };
+        if (service::get_local_storage_service().cluster_supports_correct_counter_order()) {
+            for (auto&& s : ccv.shards()) {
+                write_shard(s);
+            }
+        } else {
+            for (auto&& s : ccv.shards_compatible_with_1_7_4()) {
+                write_shard(s);
+            }
         }
 
         _c_stats.update_max_local_deletion_time(std::numeric_limits<int>::max());
@@ -2930,6 +2977,10 @@ delete_atomically(std::vector<shared_sstable> ssts) {
     return delete_atomically(std::move(sstables_to_delete_atomically));
 }
 
+void cancel_prior_atomic_deletions() {
+    g_atomic_deletion_manager.cancel_prior_atomic_deletions();
+}
+
 void cancel_atomic_deletions() {
     g_atomic_deletion_manager.cancel_atomic_deletions();
 }
@@ -3019,5 +3070,14 @@ mutation_source sstable::as_mutation_source() {
     });
 }
 
+
+}
+
+namespace seastar {
+
+void
+lw_shared_ptr_deleter<sstables::sstable>::dispose(sstables::sstable* s) {
+    delete s;
+}
 
 }

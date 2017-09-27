@@ -54,11 +54,11 @@
 
 #include "sstables.hh"
 #include "compaction.hh"
+#include "compaction_manager.hh"
 #include "database.hh"
 #include "mutation_reader.hh"
 #include "schema.hh"
 #include "db/system_keyspace.hh"
-#include "db/query_context.hh"
 #include "service/storage_service.hh"
 #include "service/priority_manager.hh"
 #include "db_clock.hh"
@@ -68,23 +68,6 @@
 namespace sstables {
 
 logging::logger clogger("compaction");
-
-class sstable_reader final : public ::mutation_reader::impl {
-    shared_sstable _sst;
-    mutation_reader _reader;
-public:
-    sstable_reader(shared_sstable sst, schema_ptr schema)
-            : _sst(std::move(sst))
-            , _reader(_sst->read_rows(schema, service::get_local_compaction_priority()))
-            {}
-    virtual future<streamed_mutation_opt> operator()() override {
-        return _reader.read().handle_exception([sst = _sst] (auto ep) {
-            clogger.error("Compaction found an exception when reading sstable {} : {}",
-                    sst->get_filename(), ep);
-            return make_exception_future<streamed_mutation_opt>(ep);
-        });
-    }
-};
 
 static api::timestamp_type get_max_purgeable_timestamp(const column_family& cf, sstable_set::incremental_selector& selector,
         const std::unordered_set<shared_sstable>& compacting_set, const dht::decorated_key& dk) {
@@ -211,7 +194,9 @@ public:
     compaction(const compaction&) = delete;
 
     virtual ~compaction() {
-        _cf.get_compaction_manager().deregister_compaction(_info);
+        if (_info) {
+            _cf.get_compaction_manager().deregister_compaction(_info);
+        }
     }
 
     seastar::thread_attributes thread_attributes() {
@@ -262,7 +247,8 @@ private:
                 ::mutation_reader::forwarding::no);
     }
 
-    void finish(std::chrono::time_point<db_clock> started_at, std::chrono::time_point<db_clock> ended_at) {
+    compaction_info finish(std::chrono::time_point<db_clock> started_at, std::chrono::time_point<db_clock> ended_at) {
+        _info->ended_at = std::chrono::duration_cast<std::chrono::milliseconds>(ended_at.time_since_epoch()).count();
         auto ratio = double(_info->end_size) / double(_info->start_size);
         auto duration = std::chrono::duration<float>(ended_at - started_at);
         auto throughput = (double(_info->end_size) / (1024*1024)) / duration.count();
@@ -282,6 +268,10 @@ private:
             std::chrono::duration_cast<std::chrono::milliseconds>(duration).count(), throughput,
             _info->total_partitions, _info->total_keys_written);
         report_finish(formatted_msg, ended_at);
+
+        auto info = std::move(_info);
+        _cf.get_compaction_manager().deregister_compaction(info);
+        return std::move(*info);
     }
 
     virtual void report_start(const sstring& formatted_msg) const = 0;
@@ -314,7 +304,7 @@ private:
         return _cf.schema();
     }
 public:
-    static future<std::vector<shared_sstable>> run(std::unique_ptr<compaction> c);
+    static future<compaction_info> run(std::unique_ptr<compaction> c);
 
     friend class compacting_sstable_writer;
 };
@@ -368,18 +358,6 @@ public:
 
     void report_finish(const sstring& formatted_msg, std::chrono::time_point<db_clock> ended_at) const override {
         clogger.info("Compacted {}", formatted_msg);
-
-        // skip update if running without a query context, for example, when running a test case.
-        if (!db::qctx) {
-            return;
-        }
-        // FIXME: add support to merged_rows. merged_rows is a histogram that
-        // shows how many sstables each row is merged from. This information
-        // cannot be accessed until we make combined_reader more generic,
-        // for example, by adding a reducer method.
-        auto compacted_at = std::chrono::duration_cast<std::chrono::milliseconds>(ended_at.time_since_epoch()).count();
-        db::system_keyspace::update_compaction_history(_info->ks, _info->cf, compacted_at,
-            _info->start_size, _info->end_size, std::unordered_map<int32_t, int64_t>{}).get0();
     }
 
     virtual std::function<api::timestamp_type(const dht::decorated_key&)> max_purgeable_func() override {
@@ -508,7 +486,7 @@ public:
     }
 };
 
-future<std::vector<shared_sstable>> compaction::run(std::unique_ptr<compaction> c) {
+future<compaction_info> compaction::run(std::unique_ptr<compaction> c) {
     auto attr = c->thread_attributes();
     return seastar::async(std::move(attr), [c = std::move(c)] () mutable {
         auto reader = c->setup();
@@ -526,9 +504,7 @@ future<std::vector<shared_sstable>> compaction::run(std::unique_ptr<compaction> 
             throw;
         }
 
-        c->finish(std::move(start_time), db_clock::now());
-
-        return std::move(c->_info->new_sstables);
+        return c->finish(std::move(start_time), db_clock::now());
     });
 }
 
@@ -541,7 +517,7 @@ static std::unique_ptr<compaction> make_compaction(bool cleanup, Params&&... par
     }
 }
 
-future<std::vector<shared_sstable>>
+future<compaction_info>
 compact_sstables(std::vector<shared_sstable> sstables, column_family& cf, std::function<shared_sstable()> creator,
         uint64_t max_sstable_size, uint32_t sstable_level, bool cleanup, seastar::thread_scheduling_group *tsg) {
     if (sstables.empty()) {
@@ -558,7 +534,9 @@ reshard_sstables(std::vector<shared_sstable> sstables, column_family& cf, std::f
         throw std::runtime_error(sprint("Called resharding with empty set on behalf of {}.{}", cf.schema()->ks_name(), cf.schema()->cf_name()));
     }
     auto c = std::make_unique<resharding_compaction>(std::move(sstables), cf, std::move(creator), max_sstable_size, sstable_level, tsg);
-    return compaction::run(std::move(c));
+    return compaction::run(std::move(c)).then([] (auto ret) {
+        return std::move(ret.new_sstables);
+    });
 }
 
 std::vector<sstables::shared_sstable>

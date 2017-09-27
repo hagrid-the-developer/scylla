@@ -51,6 +51,7 @@
 #include "service/query_state.hh"
 #include "cql3/query_options.hh"
 #include "cql3/query_processor.hh"
+#include "cql3/untyped_result_set.hh"
 #include "utils/fb_utilities.hh"
 #include "utils/hash.hh"
 #include "dht/i_partitioner.hh"
@@ -71,6 +72,7 @@
 #include "message/messaging_service.hh"
 #include "mutation_query.hh"
 #include "db/size_estimates_virtual_reader.hh"
+#include "sstables/sstables.hh"
 
 using days = std::chrono::duration<int, std::ratio<24 * 3600>>;
 
@@ -1016,9 +1018,13 @@ static future<> build_bootstrap_info() {
 
 future<> init_local_cache() {
     return _local_cache.start().then([] {
+
+        // Do not stop _local_cache here. See #2721.
+        /*
         engine().at_exit([] {
             return _local_cache.stop();
         });
+        */
     });
 }
 

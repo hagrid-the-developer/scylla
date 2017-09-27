@@ -26,17 +26,12 @@
 #include "core/thread.hh"
 
 #include "database.hh"
-#include "mutation_reader.hh"
 #include "schema_builder.hh"
-#include "partition_slice_builder.hh"
 #include "tmpdir.hh"
 #include "sstable_mutation_readers.hh"
-#include "cell_locking.hh"
 
 #include "tests/test-utils.hh"
-#include "tests/mutation_assertions.hh"
 #include "tests/mutation_reader_assertions.hh"
-#include "tests/result_set_assertions.hh"
 #include "tests/simple_schema.hh"
 #include "tests/sstable_utils.hh"
 #include "tests/sstable_test.hh"
@@ -58,7 +53,7 @@ struct sst_factory {
     {}
 
     sstables::shared_sstable operator()() {
-        auto sst = make_lw_shared<sstables::sstable>(s, path, gen, sstables::sstable::version_types::la, sstables::sstable::format_types::big);
+        auto sst = sstables::make_sstable(s, path, gen, sstables::sstable::version_types::la, sstables::sstable::format_types::big);
         sst->set_unshared();
 
         //TODO set sstable level, to make the test more interesting
@@ -132,8 +127,6 @@ SEASTAR_TEST_CASE(combined_mutation_reader_test) {
         s.add_row(table_a_mutations.back(), ckeys[i], sprint("val_a_%i", i));
 
         auto tmp = make_lw_shared<tmpdir>();
-
-        std::cout << tmp->path << std::endl;
 
         unsigned gen{0};
 
