@@ -3483,7 +3483,6 @@ uint32_t time_point_to_date(const db_clock::time_point& tp) {
 
 db_clock::time_point date_to_time_point(const uint32_t date) {
     const auto epoch = boost::posix_time::from_time_t(0);
-    // XYZ: Signed from unsigned, what is the result?
     const auto target_date = epoch + boost::gregorian::days(int64_t(date) - (1UL<<31));
     boost::posix_time::time_duration duration = target_date - epoch;
     const auto millis = std::chrono::milliseconds(duration.total_milliseconds());

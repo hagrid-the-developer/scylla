@@ -65,14 +65,14 @@ shared_ptr<function> make_castas_function(data_type to_type, data_type from_type
 } /* Anonymous Namespace */
 
 shared_ptr<function> castas_functions::get(data_type to_type, const std::vector<shared_ptr<cql3::selection::selector>>& provided_args, schema_ptr s) {
-    if (provided_args.size() != 1)
+    if (provided_args.size() != 1) {
         throw exceptions::invalid_request_exception("Invalid CAST expression");
+    }
     auto from_type = provided_args[0]->get_type();
     auto from_type_key = from_type;
     if (from_type_key->is_reversed()) {
         from_type_key = dynamic_cast<const reversed_type_impl&>(*from_type).underlying_type();
     }
-    std::cerr << "XYZ: ToType:" << to_type->name() << "; from-type:" << from_type->name() << std::endl;
 
     auto castas_fctns = get_castas_fctns();
     auto it_candidate = castas_fctns.find(castas_fctn_key{to_type, from_type_key});
