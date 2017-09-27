@@ -124,34 +124,6 @@ SEASTAR_TEST_CASE(test_unsupported_conversions) {
     });
 }
 
-#if 0
-    // https://github.com/apache/cassandra/compare/trunk...blerer:10310-3.0#diff-34f509a73496e57ec9d7786e56cad0a0
-    public void testInvalidQueries() throws Throwable
-    {
-        createTable("CREATE TABLE %s (a int primary key, b text, c double)");
-
-        assertInvalidSyntaxMessage("no viable alternative at input '(' (... b, c) VALUES ([CAST](...)",
-                                   "INSERT INTO %s (a, b, c) VALUES (CAST(? AS int), ?, ?)", 1.6, "test", 6.3);
-
-        assertInvalidSyntaxMessage("no viable alternative at input '(' (..." + KEYSPACE + "." + currentTable()
-                + " SET c = [cast](...)",
-                                   "UPDATE %s SET c = cast(? as double) WHERE a = ?", 1, 1);
-
-        assertInvalidSyntaxMessage("no viable alternative at input '(' (...= ? WHERE a = [CAST] (...)",
-                                   "UPDATE %s SET c = ? WHERE a = CAST (? AS INT)", 1, 2.0);
-
-        assertInvalidSyntaxMessage("no viable alternative at input '(' (..." + KEYSPACE + "." + currentTable()
-                + " WHERE a = [CAST] (...)",
-                                   "DELETE FROM %s WHERE a = CAST (? AS INT)", 1, 2.0);
-
-        assertInvalidSyntaxMessage("no viable alternative at input '(' (..." + KEYSPACE + "." + currentTable()
-                + " WHERE a = [CAST] (...)",
-                                   "SELECT * FROM %s WHERE a = CAST (? AS INT)", 1, 2.0);
-
-        assertInvalidMessage("a cannot be cast to boolean", "SELECT CAST(a AS boolean) FROM %s");
-    }
-#endif
-
 SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
     return do_with_cql_env_thread([&] (auto& e) {
         std::cerr << "XYZ: " << __LINE__ << std::endl;
@@ -166,7 +138,6 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
                       " i int)").get();
 
         e.execute_cql("INSERT INTO test (a, b, c, d, e, f, g, h) VALUES (1, 2, 3, 4, 5.2, 6.3, 7.3, 8)").get();
-        std::cerr << "Running conversion..." << std::endl;
         {
             auto msg = e.execute_cql("SELECT CAST(a AS tinyint), "
                                      "CAST(b AS tinyint), "
@@ -257,15 +228,26 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
                                      "CAST(g AS float), "
                                      "CAST(h AS float), "
                                      "CAST(i AS float) FROM test").get0();
-            assert_that(msg).is_rows().with_size(1).with_row({{float_type->decompose(float(1))},
-                                                              {float_type->decompose(float(2))},
-                                                              {float_type->decompose(float(3))},
-                                                              {float_type->decompose(float(4))},
-                                                              {float_type->decompose(float(5.2))},
-                                                              {float_type->decompose(float(6.3))},
-                                                              {float_type->decompose(float(7.3))},
-                                                              {float_type->decompose(float(8))},
-                                                              {}});
+            // Conversions that include floating point cannot be compared with assert_that(), because result
+            //   of such conversions may be slightly different from theoretical values.
+            auto cmp = [&](::size_t index, float req) {
+                auto row = dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front();
+                auto val = value_cast<float>( float_type->deserialize(row[index].value()) );
+                BOOST_CHECK_CLOSE(val, req, 1e-4);
+            };
+            auto cmp_null = [&](::size_t index) {
+                auto row = dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front();
+                BOOST_CHECK(!row[index]);
+            };
+            cmp(0, 1.f);
+            cmp(1, 2.f);
+            cmp(2, 3.f);
+            cmp(3, 4.f);
+            cmp(4, 5.2f);
+            cmp(5, 6.3f);
+            cmp(6, 7.3f);
+            cmp(7, 8.f);
+            cmp_null(8);
         }
         {
             auto msg = e.execute_cql("SELECT CAST(a AS double), "
@@ -277,7 +259,7 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
                                      "CAST(g AS double), "
                                      "CAST(h AS double), "
                                      "CAST(i AS double) FROM test").get0();
-            // Conversions to double cannot be compared with assert_that(), because result
+            // Conversions that include floating points cannot be compared with assert_that(), because result
             //   of such conversions may be slightly different from theoretical values.
             auto cmp = [&](::size_t index, double req) {
                 auto row = dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front();
@@ -308,14 +290,6 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
                                      "CAST(g AS decimal), "
                                      "CAST(h AS decimal), "
                                      "CAST(i AS decimal) FROM test").get0();
-        std::cerr << "XYZ: [0]: " << ( decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[0].value()) ) << ";" << std::endl;
-        std::cerr << "XYZ: [1]: " << ( decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[1].value()) ) << ";" << std::endl;
-        std::cerr << "XYZ: [2]: " << ( decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[2].value()) ) << ";" << std::endl;
-        std::cerr << "XYZ: [3]: " << ( decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[3].value()) ) << ";" << std::endl;
-        std::cerr << "XYZ: [4]: " << ( decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[4].value()) ) << ";" << std::endl;
-        std::cerr << "XYZ: [5]: " << ( decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[5].value()) ) << ";" << std::endl;
-        std::cerr << "XYZ: [6]: " << ( decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[6].value()) ) << ";" << std::endl;
-        std::cerr << "XYZ: [7]: " << ( decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[7].value()) ) << ";" << std::endl;
             // Conversions that include floating points cannot be compared with assert_that(), because result
             //   of such conversions may be slightly different from theoretical values.
             auto cmp = [&](::size_t index, double req) {
