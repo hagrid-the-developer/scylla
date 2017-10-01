@@ -26,6 +26,7 @@
 #include <boost/test/unit_test.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
 
+#include "utils/big_decimal.hh"
 #include "exceptions/exceptions.hh"
 #include "tests/test-utils.hh"
 #include "tests/cql_test_env.hh"
@@ -123,38 +124,8 @@ SEASTAR_TEST_CASE(test_unsupported_conversions) {
     });
 }
 
-#if 0
-    // https://github.com/apache/cassandra/compare/trunk...blerer:10310-3.0#diff-34f509a73496e57ec9d7786e56cad0a0
-    public void testInvalidQueries() throws Throwable
-    {
-        createTable("CREATE TABLE %s (a int primary key, b text, c double)");
-
-        assertInvalidSyntaxMessage("no viable alternative at input '(' (... b, c) VALUES ([CAST](...)",
-                                   "INSERT INTO %s (a, b, c) VALUES (CAST(? AS int), ?, ?)", 1.6, "test", 6.3);
-
-        assertInvalidSyntaxMessage("no viable alternative at input '(' (..." + KEYSPACE + "." + currentTable()
-                + " SET c = [cast](...)",
-                                   "UPDATE %s SET c = cast(? as double) WHERE a = ?", 1, 1);
-
-        assertInvalidSyntaxMessage("no viable alternative at input '(' (...= ? WHERE a = [CAST] (...)",
-                                   "UPDATE %s SET c = ? WHERE a = CAST (? AS INT)", 1, 2.0);
-
-        assertInvalidSyntaxMessage("no viable alternative at input '(' (..." + KEYSPACE + "." + currentTable()
-                + " WHERE a = [CAST] (...)",
-                                   "DELETE FROM %s WHERE a = CAST (? AS INT)", 1, 2.0);
-
-        assertInvalidSyntaxMessage("no viable alternative at input '(' (..." + KEYSPACE + "." + currentTable()
-                + " WHERE a = [CAST] (...)",
-                                   "SELECT * FROM %s WHERE a = CAST (? AS INT)", 1, 2.0);
-
-        assertInvalidMessage("a cannot be cast to boolean", "SELECT CAST(a AS boolean) FROM %s");
-    }
-#endif
-
 SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
-    std::cerr << "XYZ: " << __LINE__ << std::endl;
     return do_with_cql_env_thread([&] (auto& e) {
-        std::cerr << "XYZ: " << __LINE__ << std::endl;
         e.execute_cql("CREATE TABLE test (a tinyint primary key,"
                       " b smallint,"
                       " c int,"
@@ -165,9 +136,7 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
                       " h varint,"
                       " i int)").get();
 
-        std::cerr << "XYZ: " << __LINE__ << std::endl;
         e.execute_cql("INSERT INTO test (a, b, c, d, e, f, g, h) VALUES (1, 2, 3, 4, 5.2, 6.3, 7.3, 8)").get();
-        std::cerr << "Running conversion..." << std::endl;
         {
             auto msg = e.execute_cql("SELECT CAST(a AS tinyint), "
                                      "CAST(b AS tinyint), "
@@ -178,7 +147,6 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
                                      "CAST(g AS tinyint), "
                                      "CAST(h AS tinyint), "
                                      "CAST(i AS tinyint) FROM test").get0();
-            //std::cerr << "XYZ: [8]: " << (int)value_cast<int8_t>( byte_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[8].value()) ) << ";" << std::endl;
             assert_that(msg).is_rows().with_size(1).with_row({{byte_type->decompose(int8_t(1))},
                                                               {byte_type->decompose(int8_t(2))},
                                                               {byte_type->decompose(int8_t(3))},
@@ -259,15 +227,26 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
                                      "CAST(g AS float), "
                                      "CAST(h AS float), "
                                      "CAST(i AS float) FROM test").get0();
-            assert_that(msg).is_rows().with_size(1).with_row({{float_type->decompose(float(1))},
-                                                              {float_type->decompose(float(2))},
-                                                              {float_type->decompose(float(3))},
-                                                              {float_type->decompose(float(4))},
-                                                              {float_type->decompose(float(5.2))},
-                                                              {float_type->decompose(float(6.3))},
-                                                              {float_type->decompose(float(7.3))},
-                                                              {float_type->decompose(float(8))},
-                                                              {}});
+            // Conversions that include floating point cannot be compared with assert_that(), because result
+            //   of such conversions may be slightly different from theoretical values.
+            auto cmp = [&](::size_t index, float req) {
+                auto row = dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front();
+                auto val = value_cast<float>( float_type->deserialize(row[index].value()) );
+                BOOST_CHECK_CLOSE(val, req, 1e-4);
+            };
+            auto cmp_null = [&](::size_t index) {
+                auto row = dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front();
+                BOOST_CHECK(!row[index]);
+            };
+            cmp(0, 1.f);
+            cmp(1, 2.f);
+            cmp(2, 3.f);
+            cmp(3, 4.f);
+            cmp(4, 5.2f);
+            cmp(5, 6.3f);
+            cmp(6, 7.3f);
+            cmp(7, 8.f);
+            cmp_null(8);
         }
         {
             auto msg = e.execute_cql("SELECT CAST(a AS double), "
@@ -279,8 +258,8 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
                                      "CAST(g AS double), "
                                      "CAST(h AS double), "
                                      "CAST(i AS double) FROM test").get0();
-            // Conversions to double cannot be compared with assert_that(), because result
-            //   of double conversions may be slightly different from theoretical values.
+            // Conversions that include floating points cannot be compared with assert_that(), because result
+            //   of such conversions may be slightly different from theoretical values.
             auto cmp = [&](::size_t index, double req) {
                 auto row = dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front();
                 auto val = value_cast<double>( double_type->deserialize(row[index].value()) );
@@ -299,9 +278,37 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
             cmp(6, 7.3d);
             cmp(7, 8.d);
             cmp_null(8);
-            /*
-               std::cerr << "XYZ: [0]: " << value_cast<double>( double_type->deserialize(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[0].value()) ) << ";" << std::endl;
-             */
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS decimal), "
+                                     "CAST(b AS decimal), "
+                                     "CAST(c AS decimal), "
+                                     "CAST(d AS decimal), "
+                                     "CAST(e AS decimal), "
+                                     "CAST(f AS decimal), "
+                                     "CAST(g AS decimal), "
+                                     "CAST(h AS decimal), "
+                                     "CAST(i AS decimal) FROM test").get0();
+            // Conversions that include floating points cannot be compared with assert_that(), because result
+            //   of such conversions may be slightly different from theoretical values.
+            auto cmp = [&](::size_t index, double req) {
+                auto row = dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front();
+                auto val = value_cast<big_decimal>( decimal_type->deserialize(row[index].value()) );
+                BOOST_CHECK_CLOSE(boost::lexical_cast<double>(val.to_string()), req, 1e-4);
+            };
+            auto cmp_null = [&](::size_t index) {
+                auto row = dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front();
+                BOOST_CHECK(!row[index]);
+            };
+            cmp(0, 1.d);
+            cmp(1, 2.d);
+            cmp(2, 3.d);
+            cmp(3, 4.d);
+            cmp(4, 5.2d);
+            cmp(5, 6.3d);
+            cmp(6, 7.3d);
+            cmp(7, 8.d);
+            cmp_null(8);
         }
         {
             auto msg = e.execute_cql("SELECT CAST(a AS ascii), "
@@ -346,125 +353,117 @@ SEASTAR_TEST_CASE(test_numeric_casts_in_selection_clause) {
     });
 }
 
-#if 0
-        assertColumnNames(execute("SELECT CAST(b AS int), CAST(c AS int), CAST(d AS double) FROM %s"),
-                          "cast(b as int)",
-                          "c",
-                          "cast(d as double)");
+SEASTAR_TEST_CASE(test_time_casts_in_selection_clause) {
+    return do_with_cql_env_thread([&] (auto& e) {
+        e.execute_cql("CREATE TABLE test (a timeuuid primary key,"
+                      "b timestamp,"
+                      "c date,"
+                      "d time)").get();
 
-        assertRows(execute("SELECT CAST(a AS decimal), " +
-                "CAST(b AS decimal), " +
-                "CAST(c AS decimal), " +
-                "CAST(d AS decimal), " +
-                "CAST(e AS decimal), " +
-                "CAST(f AS decimal), " +
-                "CAST(g AS decimal), " +
-                "CAST(h AS decimal), " +
-                "CAST(i AS decimal) FROM %s"),
-                   row(BigDecimal.valueOf(1.0),
-                       BigDecimal.valueOf(2.0),
-                       BigDecimal.valueOf(3.0),
-                       BigDecimal.valueOf(4.0),
-                       BigDecimal.valueOf(5.2F),
-                       BigDecimal.valueOf(6.3),
-                       BigDecimal.valueOf(6.3),
-                       BigDecimal.valueOf(4.0),
-                       null));
-
-#endif
-
-#if 0
-    @Test
-    public void testTimeCastsInSelectionClause() throws Throwable
-    {
-        createTable("CREATE TABLE %s (a timeuuid primary key, b timestamp, c date, d time)");
-
-        DateTime dateTime = DateTimeFormat.forPattern("yyyy-MM-dd hh:mm:ss")
-                .withZone(DateTimeZone.UTC)
-                .parseDateTime("2015-05-21 11:03:02");
-
-        DateTime date = DateTimeFormat.forPattern("yyyy-MM-dd")
-                .withZone(DateTimeZone.UTC)
-                .parseDateTime("2015-05-21");
-
-        long timeInMillis = dateTime.getMillis();
-
-        execute("INSERT INTO %s (a, b, c, d) VALUES (?, '2015-05-21 11:03:02+00', '2015-05-21', '11:03:02')",
-                UUIDGen.getTimeUUID(timeInMillis));
-
-        assertRows(execute("SELECT CAST(a AS timestamp), " +
-                           "CAST(b AS timestamp), " +
-                           "CAST(c AS timestamp) FROM %s"),
-                   row(new Date(dateTime.getMillis()), new Date(dateTime.getMillis()), new Date(date.getMillis())));
-
-        int timeInMillisToDay = SimpleDateSerializer.timeInMillisToDay(date.getMillis());
-        assertRows(execute("SELECT CAST(a AS date), " +
-                           "CAST(b AS date), " +
-                           "CAST(c AS date) FROM %s"),
-                   row(timeInMillisToDay, timeInMillisToDay, timeInMillisToDay));
-
-        assertRows(execute("SELECT CAST(b AS text), " +
-                           "CAST(c AS text), " +
-                           "CAST(d AS text) FROM %s"),
-                   row("2015-05-21T11:03:02.000Z", "2015-05-21", "11:03:02.000000000"));
-    }
-
-    @Test
-    public void testOtherTypeCastsInSelectionClause() throws Throwable
-    {
-        createTable("CREATE TABLE %s (a ascii primary key,"
-                                   + " b inet,"
-                                   + " c boolean)");
-
-        execute("INSERT INTO %s (a, b, c) VALUES (?, '127.0.0.1', ?)",
-                "test", true);
-
-        assertRows(execute("SELECT CAST(a AS text), " +
-                "CAST(b AS text), " +
-                "CAST(c AS text) FROM %s"),
-                   row("test", "127.0.0.1", "true"));
-    }
-
-    @Test
-    public void testCastsWithReverseOrder() throws Throwable
-    {
-        createTable("CREATE TABLE %s (a int,"
-                                   + " b smallint,"
-                                   + " c double,"
-                                   + " primary key (a, b)) WITH CLUSTERING ORDER BY (b DESC);");
-
-        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)",
-                1, (short) 2, 6.3);
-
-        assertRows(execute("SELECT CAST(a AS tinyint), " +
-                "CAST(b AS tinyint), " +
-                "CAST(c AS tinyint) FROM %s"),
-                   row((byte) 1, (byte) 2, (byte) 6));
-
-        assertRows(execute("SELECT CAST(CAST(a AS tinyint) AS smallint), " +
-                "CAST(CAST(b AS tinyint) AS smallint), " +
-                "CAST(CAST(c AS tinyint) AS smallint) FROM %s"),
-                   row((short) 1, (short) 2, (short) 6));
-
-        assertRows(execute("SELECT CAST(CAST(CAST(a AS tinyint) AS double) AS text), " +
-                "CAST(CAST(CAST(b AS tinyint) AS double) AS text), " +
-                "CAST(CAST(CAST(c AS tinyint) AS double) AS text) FROM %s"),
-                   row("1.0", "2.0", "6.0"));
-
-        String f = createFunction(KEYSPACE, "int",
-                                  "CREATE FUNCTION %s(val int) " +
-                                          "RETURNS NULL ON NULL INPUT " +
-                                          "RETURNS double " +
-                                          "LANGUAGE java " +
-                                          "AS 'return (double)val;'");
-
-        assertRows(execute("SELECT " + f + "(CAST(b AS int)) FROM %s"),
-                   row((double) 2));
-
-        assertRows(execute("SELECT CAST(" + f + "(CAST(b AS int)) AS text) FROM %s"),
-                   row("2.0"));
-    }
+        e.execute_cql("INSERT INTO test (a, b, c, d) VALUES (d2177dd0-eaa2-11de-a572-001b779c76e3, '2015-05-21 11:03:02+00', '2015-05-21', '11:03:02')").get();
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS timestamp), CAST(a AS date), CAST(a AS time), CAST(b as date), CAST(b AS time), CAST(c AS timestamp) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{timestamp_type->from_string("2009-12-17t00:26:29.805+00")},
+                                                              {simple_date_type->from_string("2009-12-17")},
+                                                              {time_type->from_string("00:26:29.805000000")},
+                                                              {simple_date_type->from_string("2015-05-21")},
+                                                              {time_type->from_string("11:03:02.000000000")},
+                                                              {timestamp_type->from_string("2015-05-21t00:00:00+00")}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(CAST(a AS timestamp) AS text), CAST(CAST(a AS date) AS text), CAST(CAST(a AS time) AS text), CAST(CAST(b as date) AS text), CAST(CAST(b AS time) AS text), CAST(CAST(c AS timestamp) AS text) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{utf8_type->from_string("2009-12-17T00:26:29.805000")},
+                                                              {utf8_type->from_string("2009-12-17")},
+                                                              {utf8_type->from_string("00:26:29.805000000")},
+                                                              {utf8_type->from_string("2015-05-21")},
+                                                              {utf8_type->from_string("11:03:02.000000000")},
+                                                              {utf8_type->from_string("2015-05-21T00:00:00")}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS text), CAST(b as text), CAST(c AS text), CAST(d AS text) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{utf8_type->from_string("d2177dd0-eaa2-11de-a572-001b779c76e3")},
+                                                              {utf8_type->from_string("2015-05-21T11:03:02")},
+                                                              {utf8_type->from_string("2015-05-21")},
+                                                              {utf8_type->from_string("11:03:02.000000000")}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(CAST(a AS timestamp) AS ascii), CAST(CAST(a AS date) AS ascii), CAST(CAST(a AS time) AS ascii), CAST(CAST(b as date) AS ascii), CAST(CAST(b AS time) AS ascii), CAST(CAST(c AS timestamp) AS ascii) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{ascii_type->from_string("2009-12-17T00:26:29.805000")},
+                                                              {ascii_type->from_string("2009-12-17")},
+                                                              {ascii_type->from_string("00:26:29.805000000")},
+                                                              {ascii_type->from_string("2015-05-21")},
+                                                              {ascii_type->from_string("11:03:02.000000000")},
+                                                              {ascii_type->from_string("2015-05-21T00:00:00")}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS ascii), CAST(b as ascii), CAST(c AS ascii), CAST(d AS ascii) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{ascii_type->from_string("d2177dd0-eaa2-11de-a572-001b779c76e3")},
+                                                              {ascii_type->from_string("2015-05-21T11:03:02")},
+                                                              {ascii_type->from_string("2015-05-21")},
+                                                              {ascii_type->from_string("11:03:02.000000000")}});
+        }
+    });
 }
-View
 
-#endif
+SEASTAR_TEST_CASE(test_other_type_casts_in_selection_clause) {
+    return do_with_cql_env_thread([&] (auto& e) {
+        e.execute_cql("CREATE TABLE test (a ascii primary key,"
+                      "b inet,"
+                      "c boolean)").get();
+        e.execute_cql("INSERT INTO test (a, b, c) VALUES ('test', '127.0.0.1', true)").get();
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS text), CAST(b as text), CAST(c AS text) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{utf8_type->from_string("test")},
+                                                              {utf8_type->from_string("127.0.0.1")},
+                                                              {utf8_type->from_string("true")}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS ascii), CAST(b as ascii), CAST(c AS ascii) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{ascii_type->from_string("test")},
+                                                              {ascii_type->from_string("127.0.0.1")},
+                                                              {ascii_type->from_string("true")}});
+        }
+    });
+}
+
+SEASTAR_TEST_CASE(test_casts_with_revrsed_order_in_selection_clause) {
+    return do_with_cql_env_thread([&] (auto& e) {
+        e.execute_cql("CREATE TABLE test (a int,"
+                      "b smallint,"
+                      "c double,"
+                      "primary key (a, b)) WITH CLUSTERING ORDER BY (b DESC)").get();
+        e.execute_cql("INSERT INTO test (a, b, c) VALUES (1, 2, 6.3)").get();
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS tinyint), CAST(b as tinyint), CAST(c AS tinyint) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{byte_type->from_string("1")},
+                                                              {byte_type->from_string("2")},
+                                                              {byte_type->from_string("6")}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS smallint), CAST(b as smallint), CAST(c AS smallint) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{short_type->from_string("1")},
+                                                              {short_type->from_string("2")},
+                                                              {short_type->from_string("6")}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS double), CAST(b as double), CAST(c AS double) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{double_type->from_string("1")},
+                                                              {double_type->from_string("2")},
+                                                              {double_type->from_string("6.3")}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS text), CAST(b as text), CAST(c AS text) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{utf8_type->from_string("1")},
+                                                              {utf8_type->from_string("2")},
+                                                              {utf8_type->from_string("6.3")}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT CAST(a AS ascii), CAST(b as ascii), CAST(c AS ascii) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{ascii_type->from_string("1")},
+                                                              {ascii_type->from_string("2")},
+                                                              {ascii_type->from_string("6.3")}});
+        }
+    });
+}
+
+// FIXME: Add test with user-defined functions after they are available.

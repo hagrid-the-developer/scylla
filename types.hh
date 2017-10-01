@@ -1658,4 +1658,14 @@ struct appending_hash<data_type> {
  */
 
 using castas_fctn = std::function<data_value(data_value)>;
-extern thread_local std::vector<std::tuple<data_type, data_type, castas_fctn>> castas_fctns;
+
+// Map <ToType, FromType> -> castas_fctn
+using castas_fctn_key = std::tuple<data_type, data_type>;
+struct castas_fctn_hash {
+    std::size_t operator()(const castas_fctn_key& x) const noexcept {
+        return boost::hash_value(x);
+    }
+};
+using castas_fctns_map = std::unordered_map<castas_fctn_key, castas_fctn, castas_fctn_hash>;
+
+const castas_fctns_map& get_castas_fctns();

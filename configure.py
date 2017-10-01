@@ -167,6 +167,7 @@ modes = {
 
 scylla_tests = [
     'tests/mutation_test',
+    'tests/mvcc_test',
     'tests/streamed_mutation_test',
     'tests/schema_registry_test',
     'tests/canonical_mutation_test',
@@ -223,7 +224,7 @@ scylla_tests = [
     'tests/murmur_hash_test',
     'tests/allocation_strategy_test',
     'tests/logalloc_test',
-    'tests/log_histogram_test',
+    'tests/log_heap_test',
     'tests/managed_vector_test',
     'tests/crc_test',
     'tests/flush_queue_test',
@@ -336,7 +337,6 @@ scylla_core = (['database.cc',
                  'sstables/compress.cc',
                  'sstables/row.cc',
                  'sstables/partition.cc',
-                 'sstables/filter.cc',
                  'sstables/compaction.cc',
                  'sstables/compaction_strategy.cc',
                  'sstables/compaction_manager.cc',
@@ -674,7 +674,7 @@ deps['tests/input_stream_test'] = ['tests/input_stream_test.cc']
 deps['tests/UUID_test'] = ['utils/UUID_gen.cc', 'tests/UUID_test.cc', 'utils/uuid.cc', 'utils/managed_bytes.cc', 'utils/logalloc.cc', 'utils/dynamic_bitset.cc']
 deps['tests/murmur_hash_test'] = ['bytes.cc', 'utils/murmur_hash.cc', 'tests/murmur_hash_test.cc']
 deps['tests/allocation_strategy_test'] = ['tests/allocation_strategy_test.cc', 'utils/logalloc.cc', 'utils/dynamic_bitset.cc']
-deps['tests/log_histogram_test'] = ['tests/log_histogram_test.cc']
+deps['tests/log_heap_test'] = ['tests/log_heap_test.cc']
 deps['tests/anchorless_list_test'] = ['tests/anchorless_list_test.cc']
 
 warnings = [
@@ -747,6 +747,9 @@ if not try_compile(compiler=args.cxx, source='''\
         '''):
     print('Installed boost version too old.  Please update {}.'.format(pkgname("boost-devel")))
     sys.exit(1)
+
+
+has_sanitize_address_use_after_scope = try_compile(compiler=args.cxx, flags=['-fsanitize-address-use-after-scope'], source='int f() {}')
 
 defines = ' '.join(['-D' + d for d in defines])
 
@@ -848,7 +851,7 @@ with open(buildfile, 'w') as f:
         builddir = {outdir}
         cxx = {cxx}
         cxxflags = {user_cflags} {warnings} {defines}
-        ldflags = {user_ldflags}
+        ldflags = -fuse-ld=gold {user_ldflags}
         libs = {libs}
         pool link_pool
             depth = {link_pool_depth}
@@ -879,7 +882,7 @@ with open(buildfile, 'w') as f:
         f.write(textwrap.dedent('''\
             cxxflags_{mode} = -I. -I $builddir/{mode}/gen -I seastar -I seastar/build/{mode}/gen
             rule cxx.{mode}
-              command = $cxx -MD -MT $out -MF $out.d {seastar_cflags} $cxxflags $cxxflags_{mode} -c -o $out $in
+              command = $cxx -MD -MT $out -MF $out.d {seastar_cflags} $cxxflags $cxxflags_{mode} $obj_cxxflags -c -o $out $in
               description = CXX $out
               depfile = $out.d
             rule link.{mode}
@@ -1012,6 +1015,9 @@ with open(buildfile, 'w') as f:
             for cc in grammar.sources('$builddir/{}/gen'.format(mode)):
                 obj = cc.replace('.cpp', '.o')
                 f.write('build {}: cxx.{} {} || {}\n'.format(obj, mode, cc, ' '.join(serializers)))
+                if cc.endswith('Parser.cpp') and has_sanitize_address_use_after_scope:
+                    # Parsers end up using huge amounts of stack space and overflowing their stack 
+                    f.write('  obj_cxxflags = -fno-sanitize-address-use-after-scope\n')
         f.write('build seastar/build/{mode}/libseastar.a seastar/build/{mode}/apps/iotune/iotune seastar/build/{mode}/gen/http/request_parser.hh seastar/build/{mode}/gen/http/http_response_parser.hh: ninja {seastar_deps}\n'
                 .format(**locals()))
         f.write('  pool = seastar_pool\n')
