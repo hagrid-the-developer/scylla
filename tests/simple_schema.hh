@@ -43,6 +43,9 @@ public:
     api::timestamp_type new_timestamp() {
         return _timestamp++;
     }
+    tombstone new_tombstone() {
+        return {new_timestamp(), gc_clock::now()};
+    }
 public:
     simple_schema()
         : _s(schema_builder("ks", "cf")
@@ -60,6 +63,10 @@ public:
 
     clustering_key make_ckey(sstring ck) {
         return clustering_key::from_single_value(*_s, data_value(ck).serialize());
+    }
+
+    query::clustering_range make_ckey_range(uint32_t start_inclusive, uint32_t end_inclusive) {
+        return query::clustering_range::make({make_ckey(start_inclusive)}, {make_ckey(end_inclusive)});
     }
 
     // Make a clustering_key which is n-th in some arbitrary sequence of keys

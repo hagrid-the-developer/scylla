@@ -20,6 +20,7 @@
  */
 
 #include "compaction_manager.hh"
+#include "sstables/sstables.hh"
 #include "database.hh"
 #include <seastar/core/metrics.hh>
 #include "exceptions.hh"
@@ -314,7 +315,7 @@ future<> compaction_manager::submit_major_compaction(column_family* cf) {
     return task->compaction_done.get_future().then([task] {});
 }
 
-future<> compaction_manager::submit_resharding_job(column_family* cf, std::function<future<>()> job) {
+future<> compaction_manager::run_resharding_job(column_family* cf, std::function<future<>()> job) {
     if (_stopped) {
         return make_ready_future<>();
     }
@@ -372,8 +373,7 @@ void compaction_manager::register_metrics() {
 
     _metrics.add_group("compaction_manager", {
         sm::make_gauge("compactions", [this] { return _stats.active_tasks; },
-                       sm::description("Holds the number of currently active compactions. "
-                                       "Too high number of concurrent compactions may overwhelm the disk.")),
+                       sm::description("Holds the number of currently active compactions.")),
     });
 }
 

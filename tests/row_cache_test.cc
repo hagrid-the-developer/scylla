@@ -458,7 +458,7 @@ SEASTAR_TEST_CASE(test_cache_delegates_to_underlying_only_once_multiple_mutation
             test(ds, query::full_partition_range, partitions.size() + 1);
             test(ds, query::full_partition_range, partitions.size() + 1);
 
-            cache->invalidate(key_after_all);
+            cache->invalidate([] {}, key_after_all);
 
             assert_that(ds(s, query::full_partition_range))
                 .produces(slice(partitions, query::full_partition_range))
@@ -623,8 +623,7 @@ SEASTAR_TEST_CASE(test_reading_from_random_partial_partition) {
         // Merge m2 into cache
         auto mt = make_lw_shared<memtable>(gen.schema());
         mt->apply(m2);
-        underlying.apply(m2);
-        cache.update(*mt, make_default_partition_presence_checker()).get();
+        cache.update([&] { underlying.apply(m2); }, *mt).get();
 
         auto rd2 = cache.make_reader(gen.schema());
         auto sm2 = rd2().get0();
@@ -651,8 +650,9 @@ SEASTAR_TEST_CASE(test_random_partition_population) {
             .produces(m1)
             .produces_end_of_stream();
 
-        underlying.apply(m2);
-        cache.invalidate().get();
+        cache.invalidate([&] {
+            underlying.apply(m2);
+        }).get();
 
         auto pr = dht::partition_range::make_singular(m2.decorated_key());
         assert_that(cache.make_reader(gen.schema(), pr))
@@ -775,15 +775,12 @@ SEASTAR_TEST_CASE(test_single_partition_update) {
         }
 
         auto mt = make_lw_shared<memtable>(s);
-        {
+        cache.update([&] {
             mutation m(pk, s);
             m.set_clustered_cell(ck3, "v", data_value(101), 1);
             mt->apply(m);
             cache_mt.apply(m);
-        }
-        cache.update(*mt, [] (auto&& key) {
-            return partition_presence_checker_result::maybe_exists;
-        }).get();
+        }, *mt).get();
 
         {
             auto reader = cache.make_reader(s, range);
@@ -799,7 +796,7 @@ SEASTAR_TEST_CASE(test_update) {
         auto cache_mt = make_lw_shared<memtable>(s);
 
         cache_tracker tracker;
-        row_cache cache(s, snapshot_source_from_snapshot(cache_mt->as_data_source()), tracker);
+        row_cache cache(s, snapshot_source_from_snapshot(cache_mt->as_data_source()), tracker, is_continuous::yes);
 
         BOOST_TEST_MESSAGE("Check cache miss with populate");
 
@@ -822,9 +819,7 @@ SEASTAR_TEST_CASE(test_update) {
             mt->apply(m);
         }
 
-        cache.update(*mt, [] (auto&& key) {
-            return partition_presence_checker_result::definitely_doesnt_exist;
-        }).get();
+        cache.update([] {}, *mt).get();
 
         for (auto&& key : keys_not_in_cache) {
             verify_has(cache, key);
@@ -846,11 +841,10 @@ SEASTAR_TEST_CASE(test_update) {
             auto m = make_new_mutation(s);
             keys_not_in_cache.push_back(m.decorated_key());
             mt2->apply(m);
+            cache.invalidate([] {}, m.decorated_key()).get();
         }
 
-        cache.update(*mt2, [] (auto&& key) {
-            return partition_presence_checker_result::maybe_exists;
-        }).get();
+        cache.update([] {}, *mt2).get();
 
         for (auto&& key : keys_not_in_cache) {
             verify_does_not_have(cache, key);
@@ -867,9 +861,7 @@ SEASTAR_TEST_CASE(test_update) {
             mt3->apply(m);
         }
 
-        cache.update(*mt3, [] (auto&& key) {
-            return partition_presence_checker_result::maybe_exists;
-        }).get();
+        cache.update([] {}, *mt3).get();
 
         for (auto&& m : new_mutations) {
             verify_has(cache, m);
@@ -884,19 +876,21 @@ SEASTAR_TEST_CASE(test_update_failure) {
         auto cache_mt = make_lw_shared<memtable>(s);
 
         cache_tracker tracker;
-        row_cache cache(s, snapshot_source_from_snapshot(cache_mt->as_data_source()), tracker);
+        row_cache cache(s, snapshot_source_from_snapshot(cache_mt->as_data_source()), tracker, is_continuous::yes);
 
         int partition_count = 1000;
 
         // populate cache with some partitions
+        using partitions_type = std::map<partition_key, mutation_partition, partition_key::less_compare>;
+        auto original_partitions = partitions_type(partition_key::less_compare(*s));
         for (int i = 0; i < partition_count / 2; i++) {
             auto m = make_new_mutation(s, i + partition_count / 2);
+            original_partitions.emplace(m.key(), m.partition());
             cache.populate(m);
         }
 
         // populate memtable with more updated partitions
         auto mt = make_lw_shared<memtable>(s);
-        using partitions_type = std::map<partition_key, mutation_partition, partition_key::less_compare>;
         auto updated_partitions = partitions_type(partition_key::less_compare(*s));
         for (int i = 0; i < partition_count; i++) {
             auto m = make_new_large_mutation(s, i);
@@ -918,7 +912,8 @@ SEASTAR_TEST_CASE(test_update_failure) {
         }
 
         auto ev = tracker.region().evictor();
-        tracker.region().make_evictable([ev, evicitons_left = int(10)] () mutable {
+        int evicitons_left = 10;
+        tracker.region().make_evictable([&] () mutable {
             if (evicitons_left == 0) {
                 return memory::reclaiming_result::reclaimed_nothing;
             }
@@ -926,29 +921,35 @@ SEASTAR_TEST_CASE(test_update_failure) {
             return ev();
         });
 
+        bool failed = false;
         try {
-            cache.update(*mt, [] (auto&& key) {
-                return partition_presence_checker_result::definitely_doesnt_exist;
-            }).get();
-            BOOST_FAIL("updating cache should have failed");
+            cache.update([] { }, *mt).get();
         } catch (const std::bad_alloc&) {
-            // expected
+            failed = true;
         }
+        BOOST_REQUIRE(!evicitons_left); // should have happened
 
         memory_hog.clear();
 
-        // verify that there are no stale partitions
-        auto reader = cache.make_reader(s, query::full_partition_range);
-        for (int i = 0; i < partition_count; i++) {
-            auto mopt = mutation_from_streamed_mutation(reader().get0()).get0();
-            if (!mopt) {
-                break;
+        auto has_only = [&] (const partitions_type& partitions) {
+            auto reader = cache.make_reader(s, query::full_partition_range);
+            for (int i = 0; i < partition_count; i++) {
+                auto mopt = mutation_from_streamed_mutation(reader().get0()).get0();
+                if (!mopt) {
+                    break;
+                }
+                auto it = partitions.find(mopt->key());
+                BOOST_REQUIRE(it != partitions.end());
+                BOOST_REQUIRE(it->second.equal(*s, mopt->partition()));
             }
-            auto it = updated_partitions.find(mopt->key());
-            BOOST_REQUIRE(it != updated_partitions.end());
-            BOOST_REQUIRE(it->second.equal(*s, mopt->partition()));
+            BOOST_REQUIRE(!reader().get0());
+        };
+
+        if (failed) {
+            has_only(original_partitions);
+        } else {
+            has_only(updated_partitions);
         }
-        BOOST_REQUIRE(!reader().get0());
     });
 }
 #endif
@@ -1072,7 +1073,7 @@ SEASTAR_TEST_CASE(test_continuity_flag_and_invalidate_race) {
         rd.produces(ring[0]);
 
         // Invalidate ring[2] and ring[3]
-        cache.invalidate(dht::partition_range::make_starting_with({ ring[2].ring_position(), true })).get();
+        cache.invalidate([] {}, dht::partition_range::make_starting_with({ ring[2].ring_position(), true })).get();
 
         // Continue previous reader.
         rd.produces(ring[1])
@@ -1087,7 +1088,7 @@ SEASTAR_TEST_CASE(test_continuity_flag_and_invalidate_race) {
           .produces(ring[2]);
 
         // Invalidate whole cache.
-        cache.invalidate().get();
+        cache.invalidate([] {}).get();
 
         rd.produces(ring[3])
           .produces_end_of_stream();
@@ -1138,10 +1139,10 @@ SEASTAR_TEST_CASE(test_cache_population_and_update_race) {
 
         sleep(10ms).get();
 
-        memtables.apply(*mt2);
-
         // This update should miss on all partitions
-        auto update_future = cache.update(*mt2, make_default_partition_presence_checker());
+        auto mt2_copy = make_lw_shared<memtable>(s);
+        mt2_copy->apply(*mt2).get();
+        auto update_future = cache.update([&] { memtables.apply(mt2_copy); }, *mt2);
 
         auto rd3 = cache.make_reader(s);
 
@@ -1201,7 +1202,7 @@ SEASTAR_TEST_CASE(test_invalidate) {
         auto some_element = keys_in_cache.begin() + 547;
         std::vector<dht::decorated_key> keys_not_in_cache;
         keys_not_in_cache.push_back(*some_element);
-        cache.invalidate(*some_element).get();
+        cache.invalidate([] {}, *some_element).get();
         keys_in_cache.erase(some_element);
 
         for (auto&& key : keys_in_cache) {
@@ -1221,7 +1222,7 @@ SEASTAR_TEST_CASE(test_invalidate) {
             { *some_range_begin, true }, { *some_range_end, false }
         );
         keys_not_in_cache.insert(keys_not_in_cache.end(), some_range_begin, some_range_end);
-        cache.invalidate(range).get();
+        cache.invalidate([] {}, range).get();
         keys_in_cache.erase(some_range_begin, some_range_end);
 
         for (auto&& key : keys_in_cache) {
@@ -1265,11 +1266,10 @@ SEASTAR_TEST_CASE(test_cache_population_and_clear_race) {
 
         sleep(10ms).get();
 
-        memtables.clear();
-        memtables.apply(*mt2);
-
         // This update should miss on all partitions
-        auto cache_cleared = cache.invalidate();
+        auto cache_cleared = cache.invalidate([&] {
+            memtables.apply(mt2);
+        });
 
         auto rd2 = cache.make_reader(s);
 
@@ -1311,6 +1311,8 @@ SEASTAR_TEST_CASE(test_mvcc) {
             memtable_snapshot_source underlying(s);
             partition_key::equality eq(*s);
 
+            underlying.apply(m1);
+
             cache_tracker tracker;
             row_cache cache(s, snapshot_source([&] { return underlying(); }), tracker);
 
@@ -1338,8 +1340,9 @@ SEASTAR_TEST_CASE(test_mvcc) {
                 BOOST_REQUIRE(*mt1_reader_sm_opt);
             }
 
-            underlying.apply(*mt1);
-            cache.update(*mt1, make_default_partition_presence_checker()).get();
+            auto mt1_copy = make_lw_shared<memtable>(s);
+            mt1_copy->apply(*mt1).get();
+            cache.update([&] { underlying.apply(mt1_copy); }, *mt1).get();
 
             auto sm3 = cache.make_reader(s)().get0();
             BOOST_REQUIRE(sm3);
@@ -1368,7 +1371,7 @@ SEASTAR_TEST_CASE(test_mvcc) {
             auto m_1 = mutation_from_streamed_mutation(std::move(sm1)).get0();
             assert_that(*m_1).is_equal_to(m1);
 
-            cache.invalidate().get0();
+            cache.invalidate([] {}).get0();
 
             auto m_2 = mutation_from_streamed_mutation(std::move(sm2)).get0();
             assert_that(*m_2).is_equal_to(m1);
@@ -1422,7 +1425,7 @@ SEASTAR_TEST_CASE(test_slicing_mutation_reader) {
         row_cache cache(s, snapshot_source_from_snapshot(mt->as_data_source()), tracker);
 
         auto run_tests = [&] (auto& ps, std::deque<int> expected) {
-            cache.invalidate().get0();
+            cache.invalidate([] {}).get0();
 
             auto reader = cache.make_reader(s, query::full_partition_range, ps);
             test_sliced_read_row_presence(std::move(reader), s, expected);
@@ -1436,7 +1439,7 @@ SEASTAR_TEST_CASE(test_slicing_mutation_reader) {
             reader = cache.make_reader(s, singular_range, ps);
             test_sliced_read_row_presence(std::move(reader), s, expected);
 
-            cache.invalidate().get0();
+            cache.invalidate([] {}).get0();
 
             reader = cache.make_reader(s, singular_range, ps);
             test_sliced_read_row_presence(std::move(reader), s, expected);
@@ -1576,14 +1579,16 @@ SEASTAR_TEST_CASE(test_update_invalidating) {
         auto mt = make_lw_shared<memtable>(s.schema());
 
         auto m3 = mutation_for_key(m1.decorated_key());
+        m3.partition().apply(s.new_tombstone());
         auto m4 = mutation_for_key(keys[2]);
         auto m5 = mutation_for_key(keys[0]);
         mt->apply(m3);
         mt->apply(m4);
         mt->apply(m5);
 
-        underlying.apply(*mt);
-        cache.update_invalidating(*mt).get();
+        auto mt_copy = make_lw_shared<memtable>(s.schema());
+        mt_copy->apply(*mt).get();
+        cache.update_invalidating([&] { underlying.apply(mt_copy); }, *mt).get();
 
         assert_that(cache.make_reader(s.schema()))
             .produces(m5)
@@ -1762,6 +1767,258 @@ SEASTAR_TEST_CASE(test_tombstone_merging_in_partial_partition) {
             auto smo = rd().get0();
             BOOST_REQUIRE(smo);
             assert_that_stream(std::move(*smo)).has_monotonic_positions();
+        }
+    });
+}
+
+static void consume_all(mutation_reader& rd) {
+    while (streamed_mutation_opt smo = rd().get0()) {
+        auto&& sm = *smo;
+        while (sm().get0()) ;
+    }
+}
+
+static void populate_range(row_cache& cache,
+    const dht::partition_range& pr = query::full_partition_range,
+    const query::clustering_range& r = query::full_clustering_range)
+{
+    auto slice = partition_slice_builder(*cache.schema()).with_range(r).build();
+    auto rd = cache.make_reader(cache.schema(), pr, slice);
+    consume_all(rd);
+}
+
+static void apply(row_cache& cache, memtable_snapshot_source& underlying, const mutation& m) {
+    auto mt = make_lw_shared<memtable>(m.schema());
+    mt->apply(m);
+    cache.update([&] { underlying.apply(m); }, *mt).get();
+}
+
+SEASTAR_TEST_CASE(test_readers_get_all_data_after_eviction) {
+    return seastar::async([] {
+        simple_schema table;
+        schema_ptr s = table.schema();
+        memtable_snapshot_source underlying(s);
+
+        auto m1 = table.new_mutation("pk");
+        table.add_row(m1, table.make_ckey(3), "v3");
+
+        auto m2 = table.new_mutation("pk");
+        table.add_row(m2, table.make_ckey(1), "v1");
+        table.add_row(m2, table.make_ckey(2), "v2");
+
+        underlying.apply(m1);
+
+        cache_tracker tracker;
+        row_cache cache(s, snapshot_source([&] { return underlying(); }), tracker);
+        cache.populate(m1);
+
+        auto apply = [&] (mutation m) {
+            ::apply(cache, underlying, m);
+        };
+
+        auto make_sm = [&] (const query::partition_slice& slice = query::full_slice) {
+            auto rd = cache.make_reader(s, query::full_partition_range, slice);
+            auto smo = rd().get0();
+            BOOST_REQUIRE(smo);
+            streamed_mutation& sm = *smo;
+            sm.set_max_buffer_size(1);
+            return assert_that_stream(std::move(sm));
+        };
+
+        auto sm1 = make_sm();
+
+        apply(m2);
+
+        auto sm2 = make_sm();
+
+        auto slice_with_key2 = partition_slice_builder(*s)
+            .with_range(query::clustering_range::make_singular(table.make_ckey(2)))
+            .build();
+        auto sm3 = make_sm(slice_with_key2);
+
+        cache.evict();
+
+        sm3.produces_row_with_key(table.make_ckey(2))
+            .produces_end_of_stream();
+
+        sm1.produces(m1);
+        sm2.produces(m1 + m2);
+    });
+}
+
+//
+// Tests the following case of eviction and re-population:
+//
+// (Before)  <ROW key=0> <RT1> <RT2> <RT3> <ROW key=8, cont=1>
+//                       ^--- lower bound  ^---- next row
+//
+// (After)   <ROW key=0>    <ROW key=8, cont=0> <ROW key=8, cont=1>
+//                       ^--- lower bound       ^---- next row
+SEASTAR_TEST_CASE(test_tombstones_are_not_missed_when_range_is_invalidated) {
+    return seastar::async([] {
+        simple_schema s;
+        cache_tracker tracker;
+        memtable_snapshot_source underlying(s.schema());
+
+        auto pk = s.make_pkey(0);
+        auto pr = dht::partition_range::make_singular(pk);
+
+        mutation m1(pk, s.schema());
+        s.add_row(m1, s.make_ckey(0), "v0");
+        auto rt1 = s.make_range_tombstone(query::clustering_range::make(s.make_ckey(1), s.make_ckey(2)),
+            s.new_tombstone());
+        auto rt2 = s.make_range_tombstone(query::clustering_range::make(s.make_ckey(3), s.make_ckey(4)),
+            s.new_tombstone());
+        auto rt3 = s.make_range_tombstone(query::clustering_range::make(s.make_ckey(5), s.make_ckey(6)),
+            s.new_tombstone());
+        m1.partition().apply_delete(*s.schema(), rt1);
+        m1.partition().apply_delete(*s.schema(), rt2);
+        m1.partition().apply_delete(*s.schema(), rt3);
+        s.add_row(m1, s.make_ckey(8), "v8");
+
+        underlying.apply(m1);
+
+        row_cache cache(s.schema(), snapshot_source([&] { return underlying(); }), tracker);
+
+        auto make_sm = [&] (const query::partition_slice& slice = query::full_slice) {
+            auto rd = cache.make_reader(s.schema(), pr, slice);
+            auto smo = rd().get0();
+            BOOST_REQUIRE(smo);
+            streamed_mutation& sm = *smo;
+            sm.set_max_buffer_size(1);
+            return assert_that_stream(std::move(sm));
+        };
+
+        // populate using reader in same snapshot
+        {
+            populate_range(cache);
+
+            auto slice_after_7 = partition_slice_builder(*s.schema())
+                .with_range(query::clustering_range::make_starting_with(s.make_ckey(7)))
+                .build();
+
+            auto sma2 = make_sm(slice_after_7);
+
+            auto sma = make_sm();
+            sma.produces_row_with_key(s.make_ckey(0));
+            sma.produces_range_tombstone(rt1);
+
+            cache.evict();
+
+            sma2.produces_row_with_key(s.make_ckey(8));
+            sma2.produces_end_of_stream();
+
+            sma.produces_range_tombstone(rt2);
+            sma.produces_range_tombstone(rt3);
+            sma.produces_row_with_key(s.make_ckey(8));
+            sma.produces_end_of_stream();
+        }
+
+        // populate using reader created after invalidation
+        {
+            populate_range(cache);
+
+            auto sma = make_sm();
+            sma.produces_row_with_key(s.make_ckey(0));
+            sma.produces_range_tombstone(rt1);
+
+            mutation m2(pk, s.schema());
+            s.add_row(m2, s.make_ckey(7), "v7");
+
+            cache.invalidate([&] {
+                underlying.apply(m2);
+            }).get();
+
+            populate_range(cache, pr, query::clustering_range::make_starting_with(s.make_ckey(5)));
+
+            sma.produces_range_tombstone(rt2);
+            sma.produces_range_tombstone(rt3);
+            sma.produces_row_with_key(s.make_ckey(8));
+            sma.produces_end_of_stream();
+        }
+    });
+}
+
+SEASTAR_TEST_CASE(test_concurrent_population_before_latest_version_iterator) {
+    return seastar::async([] {
+        simple_schema s;
+        cache_tracker tracker;
+        memtable_snapshot_source underlying(s.schema());
+
+        auto pk = s.make_pkey(0);
+        auto pr = dht::partition_range::make_singular(pk);
+
+        mutation m1(pk, s.schema());
+        s.add_row(m1, s.make_ckey(0), "v");
+        s.add_row(m1, s.make_ckey(1), "v");
+        underlying.apply(m1);
+
+        row_cache cache(s.schema(), snapshot_source([&] { return underlying(); }), tracker);
+
+        auto make_sm = [&] (const query::partition_slice& slice = query::full_slice) {
+            auto rd = cache.make_reader(s.schema(), pr, slice);
+            auto smo = rd().get0();
+            BOOST_REQUIRE(smo);
+            streamed_mutation& sm = *smo;
+            sm.set_max_buffer_size(1);
+            return assert_that_stream(std::move(sm));
+        };
+
+        {
+            populate_range(cache, pr, s.make_ckey_range(0, 1));
+            auto rd = make_sm(); // to keep current version alive
+
+            mutation m2(pk, s.schema());
+            s.add_row(m2, s.make_ckey(2), "v");
+            s.add_row(m2, s.make_ckey(3), "v");
+            s.add_row(m2, s.make_ckey(4), "v");
+            apply(cache, underlying, m2);
+
+            auto slice1 = partition_slice_builder(*s.schema())
+                .with_range(s.make_ckey_range(0, 5))
+                .build();
+
+            auto sma1 = make_sm(slice1);
+            sma1.produces_row_with_key(s.make_ckey(0));
+
+            populate_range(cache, pr, s.make_ckey_range(3, 3));
+
+            auto sma2 = make_sm(slice1);
+
+            sma2.produces_row_with_key(s.make_ckey(0));
+
+            populate_range(cache, pr, s.make_ckey_range(2, 3));
+
+            sma2.produces_row_with_key(s.make_ckey(1));
+            sma2.produces_row_with_key(s.make_ckey(2));
+            sma2.produces_row_with_key(s.make_ckey(3));
+            sma2.produces_row_with_key(s.make_ckey(4));
+            sma2.produces_end_of_stream();
+
+            sma1.produces_row_with_key(s.make_ckey(1));
+            sma1.produces_row_with_key(s.make_ckey(2));
+            sma1.produces_row_with_key(s.make_ckey(3));
+            sma1.produces_row_with_key(s.make_ckey(4));
+            sma1.produces_end_of_stream();
+        }
+
+        {
+            cache.evict();
+            populate_range(cache, pr, s.make_ckey_range(4, 4));
+
+            auto slice1 = partition_slice_builder(*s.schema())
+                .with_range(s.make_ckey_range(0, 1))
+                .with_range(s.make_ckey_range(3, 3))
+                .build();
+            auto sma1 = make_sm(slice1);
+
+            sma1.produces_row_with_key(s.make_ckey(0));
+
+            populate_range(cache, pr, s.make_ckey_range(2, 4));
+
+            sma1.produces_row_with_key(s.make_ckey(1));
+            sma1.produces_row_with_key(s.make_ckey(3));
+            sma1.produces_end_of_stream();
         }
     });
 }

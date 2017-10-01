@@ -29,7 +29,9 @@
 #include "db/config.hh"
 #include "partition_slice_builder.hh"
 #include <seastar/core/reactor.hh>
+#include "sstables/compaction_manager.hh"
 #include "transport/messages/result_message.hh"
+#include "sstables/shared_index_lists.hh"
 
 #include "disk-error-handler.hh"
 
@@ -242,10 +244,11 @@ static test_result scan_with_stride_partitions(column_family& cf, int n, int n_r
     uint64_t fragments = 0;
     while (pk < n) {
         if (n_skip) {
-            rd.fast_forward_to(dht::partition_range(
+            pr = dht::partition_range(
                 dht::partition_range::bound(keys[pk], true),
                 dht::partition_range::bound(keys[std::min(n, pk + n_read) - 1], true)
-            )).get();
+            );
+            rd.fast_forward_to(pr).get();
         }
         fragments += consume_all(rd);
         pk += n_read + n_skip;
@@ -947,6 +950,10 @@ int main(int argc, char** argv) {
                     table_config cfg{name, n_rows, value_size};
                     populate(env, cfg);
                 } else {
+                    if (smp::count != 1) {
+                        throw std::runtime_error("The test must be run with one shard");
+                    }
+
                     database& db = env.local_db();
                     column_family& cf = db.find_column_family("ks", "test");
 

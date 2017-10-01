@@ -264,7 +264,8 @@ private:
     gms::feature _counters_feature;
     gms::feature _indexes_feature;
     gms::feature _digest_multipartition_read_feature;
-
+    gms::feature _correct_counter_order_feature;
+    gms::feature _schema_tables_v3;
 public:
     void enable_all_features() {
         _range_tombstones_feature.enable();
@@ -273,6 +274,8 @@ public:
         _counters_feature.enable();
         _indexes_feature.enable();
         _digest_multipartition_read_feature.enable();
+        _correct_counter_order_feature.enable();
+        _schema_tables_v3.enable();
     }
 
     void finish_bootstrapping() {
@@ -407,6 +410,7 @@ public:
 private:
     bool should_bootstrap();
     void prepare_to_join(std::vector<inet_address> loaded_endpoints);
+    void register_features();
     void join_token_ring(int delay);
 public:
     future<> join_ring();
@@ -1743,7 +1747,6 @@ private:
     future<> start_leaving();
     void leave_ring();
     void unbootstrap();
-    future<> stream_hints();
 
 public:
     future<> move(sstring new_token) {
@@ -2241,6 +2244,14 @@ public:
 
     bool cluster_supports_digest_multipartition_reads() const {
         return bool(_digest_multipartition_read_feature);
+    }
+
+    bool cluster_supports_correct_counter_order() const {
+        return bool(_correct_counter_order_feature);
+    }
+
+    bool cluster_supports_schema_tables_v3() const {
+        return bool(_schema_tables_v3);
     }
 };
 

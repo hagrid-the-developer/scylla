@@ -71,6 +71,8 @@
 #include "utils/exceptions.hh"
 #include "message/messaging_service.hh"
 #include "supervisor.hh"
+#include "sstables/compaction_manager.hh"
+#include "sstables/sstables.hh"
 
 using token = dht::token;
 using UUID = utils::UUID;
@@ -86,6 +88,8 @@ static const sstring MATERIALIZED_VIEWS_FEATURE = "MATERIALIZED_VIEWS";
 static const sstring COUNTERS_FEATURE = "COUNTERS";
 static const sstring INDEXES_FEATURE = "INDEXES";
 static const sstring DIGEST_MULTIPARTITION_READ_FEATURE = "DIGEST_MULTIPARTITION_READ";
+static const sstring CORRECT_COUNTER_ORDER_FEATURE = "CORRECT_COUNTER_ORDER";
+static const sstring SCHEMA_TABLES_V3 = "SCHEMA_TABLES_V3";
 
 distributed<storage_service> _the_storage_service;
 
@@ -127,6 +131,8 @@ sstring storage_service::get_config_supported_features() {
         LARGE_PARTITIONS_FEATURE,
         COUNTERS_FEATURE,
         DIGEST_MULTIPARTITION_READ_FEATURE,
+        CORRECT_COUNTER_ORDER_FEATURE,
+        SCHEMA_TABLES_V3
     };
     if (service::get_local_storage_service()._db.local().get_config().experimental()) {
         features.push_back(MATERIALIZED_VIEWS_FEATURE);
@@ -202,8 +208,8 @@ void storage_service::prepare_to_join(std::vector<inet_address> loaded_endpoints
         } else {
             auto msg = sstring("This node was decommissioned and will not rejoin the ring unless override_decommission=true has been set,"
                                "or all existing data is removed and the node is bootstrapped again");
-            slogger.error(msg.c_str());
-            throw std::runtime_error(msg.c_str());
+            slogger.error("{}", msg);
+            throw std::runtime_error(msg);
         }
     }
     if (db().local().is_replacing() && !get_property_join_ring()) {
@@ -317,6 +323,9 @@ void storage_service::prepare_to_join(std::vector<inet_address> loaded_endpoints
     auto& proxy = service::get_storage_proxy();
     // gossip Schema.emptyVersion forcing immediate check for schema updates (see MigrationManager#maybeScheduleSchemaPull)
     update_schema_version_and_announce(proxy).get();// Ensure we know our own actual Schema UUID in preparation for updates
+    get_storage_service().invoke_on_all([] (auto& ss) {
+        ss.register_features();
+    }).get();
 #if 0
     if (!MessagingService.instance().isListening())
         MessagingService.instance().listen(FBUtilities.getLocalAddress());
@@ -325,6 +334,20 @@ void storage_service::prepare_to_join(std::vector<inet_address> loaded_endpoints
     HintedHandOffManager.instance.start();
     BatchlogManager.instance.start();
 #endif
+}
+
+void storage_service::register_features() {
+    _range_tombstones_feature = gms::feature(RANGE_TOMBSTONES_FEATURE);
+    _large_partitions_feature = gms::feature(LARGE_PARTITIONS_FEATURE);
+    _counters_feature = gms::feature(COUNTERS_FEATURE);
+    _digest_multipartition_read_feature = gms::feature(DIGEST_MULTIPARTITION_READ_FEATURE);
+    _correct_counter_order_feature = gms::feature(CORRECT_COUNTER_ORDER_FEATURE);
+    _schema_tables_v3 = gms::feature(SCHEMA_TABLES_V3);
+
+    if (_db.local().get_config().experimental()) {
+        _materialized_views_feature = gms::feature(MATERIALIZED_VIEWS_FEATURE);
+        _indexes_feature = gms::feature(INDEXES_FEATURE);
+    }
 }
 
 // Runs inside seastar::async context
@@ -445,7 +468,7 @@ void storage_service::join_token_ring(int delay) {
         // bootstrap will block until finished
         if (_is_bootstrap_mode) {
             auto err = sprint("We are not supposed in bootstrap mode any more");
-            slogger.warn(err.c_str());
+            slogger.warn("{}", err);
             throw std::runtime_error(err);
         }
     } else {
@@ -494,7 +517,7 @@ void storage_service::join_token_ring(int delay) {
         }
         if (_token_metadata.sorted_tokens().empty()) {
             auto err = sprint("join_token_ring: Sorted token in token_metadata is empty");
-            slogger.error(err.c_str());
+            slogger.error("{}", err);
             throw std::runtime_error(err);
         }
         auth::auth::setup().get();
@@ -519,7 +542,7 @@ future<> storage_service::join_ring() {
                 slogger.info("Leaving write survey mode and joining ring at operator request");
                 if (ss._token_metadata.sorted_tokens().empty()) {
                     auto err = sprint("join_ring: Sorted token in token_metadata is empty");
-                    slogger.error(err.c_str());
+                    slogger.error("{}", err);
                     throw std::runtime_error(err);
                 }
                 auth::auth::setup().get();
@@ -889,20 +912,20 @@ void storage_service::handle_state_removing(inet_address endpoint, std::vector<s
             auto state = gossiper.get_endpoint_state_for_endpoint(endpoint);
             if (!state) {
                 auto err = sprint("Can not find endpoint_state for endpoint=%s", endpoint);
-                slogger.warn(err.c_str());
+                slogger.warn("{}", err);
                 throw std::runtime_error(err);
             }
             auto value = state->get_application_state(application_state::REMOVAL_COORDINATOR);
             if (!value) {
                 auto err = sprint("Can not find application_state for endpoint=%s", endpoint);
-                slogger.warn(err.c_str());
+                slogger.warn("{}", err);
                 throw std::runtime_error(err);
             }
             std::vector<sstring> coordinator;
             boost::split(coordinator, value->value, boost::is_any_of(sstring(versioned_value::DELIMITER_STR)));
             if (coordinator.size() != 2) {
                 auto err = sprint("Can not split REMOVAL_COORDINATOR for endpoint=%s, value=%s", endpoint, value->value);
-                slogger.warn(err.c_str());
+                slogger.warn("{}", err);
                 throw std::runtime_error(err);
             }
             UUID host_id(coordinator[1]);
@@ -910,7 +933,7 @@ void storage_service::handle_state_removing(inet_address endpoint, std::vector<s
             auto ep = _token_metadata.get_endpoint_for_host_id(host_id);
             if (!ep) {
                 auto err = sprint("Can not find host_id=%s", host_id);
-                slogger.warn(err.c_str());
+                slogger.warn("{}", err);
                 throw std::runtime_error(err);
             }
             restore_replica_count(endpoint, ep.value()).get();
@@ -1010,8 +1033,8 @@ void storage_service::on_remove(gms::inet_address endpoint) {
 
 void storage_service::on_dead(gms::inet_address endpoint, gms::endpoint_state state) {
     slogger.debug("endpoint={} on_dead", endpoint);
-    netw::get_local_messaging_service().remove_rpc_client(netw::msg_addr{endpoint, 0});
     get_storage_service().invoke_on_all([endpoint] (auto&& ss) {
+        netw::get_local_messaging_service().remove_rpc_client(netw::msg_addr{endpoint, 0});
         for (auto&& subscriber : ss._lifecycle_subscribers) {
             try {
                 subscriber->on_down(endpoint);
@@ -1346,18 +1369,6 @@ future<> storage_service::init_server(int delay) {
             }
             slogger.info("Not joining ring as requested. Use JMX (StorageService->joinRing()) to initiate ring joining");
         }
-
-        get_storage_service().invoke_on_all([] (auto& ss) {
-            ss._range_tombstones_feature = gms::feature(RANGE_TOMBSTONES_FEATURE);
-            ss._large_partitions_feature = gms::feature(LARGE_PARTITIONS_FEATURE);
-            ss._counters_feature = gms::feature(COUNTERS_FEATURE);
-            ss._digest_multipartition_read_feature = gms::feature(DIGEST_MULTIPARTITION_READ_FEATURE);
-
-            if (ss._db.local().get_config().experimental()) {
-                ss._materialized_views_feature = gms::feature(MATERIALIZED_VIEWS_FEATURE);
-                ss._indexes_feature = gms::feature(INDEXES_FEATURE);
-            }
-        }).get();
     });
 }
 
@@ -1378,16 +1389,18 @@ future<> storage_service::replicate_tm_and_ep_map(shared_ptr<gms::gossiper> g0) 
     return get_storage_service().invoke_on_all([](storage_service& local_ss) {
         if (!gms::get_gossiper().local_is_initialized()) {
             auto err = sprint("replicate_to_all_cores is called before gossiper is fully initialized");
-            slogger.warn(err.c_str());
+            slogger.warn("{}", err);
             throw std::runtime_error(err);
         }
     }).then([this, g0] {
         _shadow_token_metadata = _token_metadata;
         g0->shadow_endpoint_state_map = g0->endpoint_state_map;
+        g0->maybe_enable_features();
 
         return get_storage_service().invoke_on_all([g0, this](storage_service& local_ss) {
             if (engine().cpu_id() != 0) {
                 gms::get_local_gossiper().endpoint_state_map = g0->shadow_endpoint_state_map;
+                gms::get_local_gossiper().maybe_enable_features();
                 local_ss._token_metadata = _shadow_token_metadata;
             }
         });
@@ -1399,13 +1412,13 @@ future<> storage_service::replicate_to_all_cores() {
     // when gossiper has already been initialized.
     if (engine().cpu_id() != 0) {
         auto err = sprint("replicate_to_all_cores is not ran on cpu zero");
-        slogger.warn(err.c_str());
+        slogger.warn("{}", err);
         throw std::runtime_error(err);
     }
 
     if (!gms::get_gossiper().local_is_initialized()) {
         auto err = sprint("replicate_to_all_cores is called before gossiper on shard0 is initialized");
-        slogger.warn(err.c_str());
+        slogger.warn("{}", err);
         throw std::runtime_error(err);
     }
 
@@ -1663,7 +1676,7 @@ future<std::unordered_set<dht::token>> storage_service::get_local_tokens() {
         // should not be called before initServer sets this
         if (tokens.empty()) {
             auto err = sprint("get_local_tokens: tokens is empty");
-            slogger.error(err.c_str());
+            slogger.error("{}", err);
             throw std::runtime_error(err);
         }
         return tokens;
@@ -2515,13 +2528,10 @@ void storage_service::unbootstrap() {
 
     set_mode(mode::LEAVING, "streaming hints to other nodes", true);
 
-    auto hints_success = stream_hints();
-
     // wait for the transfer runnables to signal the latch.
     slogger.debug("waiting for stream acks.");
     try {
         stream_success.get();
-        hints_success.get();
     } catch (...) {
         slogger.warn("unbootstrap fails to stream : {}", std::current_exception());
         throw;
@@ -2666,52 +2676,6 @@ storage_service::stream_ranges(std::unordered_map<sstring, std::unordered_multim
         slogger.warn("stream_ranges failed: {}", ep);
         return make_exception_future<>(std::move(ep));
     });
-}
-
-future<> storage_service::stream_hints() {
-    // FIXME: flush hits column family
-#if 0
-    // StreamPlan will not fail if there are zero files to transfer, so flush anyway (need to get any in-memory hints, as well)
-    ColumnFamilyStore hintsCF = Keyspace.open(SystemKeyspace.NAME).getColumnFamilyStore(SystemKeyspace.HINTS);
-    FBUtilities.waitOnFuture(hintsCF.forceFlush());
-#endif
-
-    // gather all live nodes in the cluster that aren't also leaving
-    auto candidates = get_local_storage_service().get_token_metadata().clone_after_all_left().get_all_endpoints();
-    auto beg = candidates.begin();
-    auto end = candidates.end();
-    auto remove_fn = [br = get_broadcast_address()] (const inet_address& ep) {
-        return ep == br || !gms::get_local_failure_detector().is_alive(ep);
-    };
-    candidates.erase(std::remove_if(beg, end, remove_fn), end);
-
-    if (candidates.empty()) {
-        slogger.warn("Unable to stream hints since no live endpoints seen");
-        throw std::runtime_error("Unable to stream hints since no live endpoints seen");
-    } else {
-        // stream to the closest peer as chosen by the snitch
-        auto& snitch = locator::i_endpoint_snitch::get_local_snitch_ptr();
-
-        snitch->sort_by_proximity(get_broadcast_address(), candidates);
-        auto hints_destination_host = candidates.front();
-
-        // stream all hints -- range list will be a singleton of "the entire ring"
-        dht::token_range_vector ranges = {dht::token_range::make_open_ended_both_sides()};
-        slogger.debug("stream_hints: ranges={}", ranges);
-        std::unordered_map<inet_address, dht::token_range_vector> ranges_per_endpoint;
-        ranges_per_endpoint[hints_destination_host] = std::move(ranges);
-
-        auto streamer = make_lw_shared<dht::range_streamer>(_db, get_token_metadata(), get_broadcast_address(), "Hints");
-        auto keyspace = db::system_keyspace::NAME;
-        std::vector<sstring> column_families = { db::system_keyspace::HINTS };
-        streamer->add_tx_ranges(keyspace, std::move(ranges_per_endpoint), column_families);
-        return streamer->stream_async().then([streamer] {
-            slogger.info("stream_hints successful");
-        }).handle_exception([] (auto ep) {
-            slogger.warn("stream_hints failed: {}", ep);
-            return make_exception_future<>(std::move(ep));
-        });
-    }
 }
 
 future<> storage_service::start_leaving() {
@@ -2884,7 +2848,7 @@ storage_service::get_new_source_ranges(const sstring& keyspace_name, const dht::
 
         if (std::find(sources.begin(), sources.end(), my_address) != sources.end()) {
             auto err = sprint("get_new_source_ranges: sources=%s, my_address=%s", sources, my_address);
-            slogger.warn(err.c_str());
+            slogger.warn("{}", err);
             throw std::runtime_error(err);
         }
 
