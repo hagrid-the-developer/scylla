@@ -115,7 +115,7 @@ make_sum_function() {
 template <typename Type>
 class impl_avg_function_for final : public aggregate_function::aggregate {
    Type _sum{};
-   uint64_t _count = 0;
+   int64_t _count = 0;
 public:
     virtual void reset() override {
         _sum = {};
