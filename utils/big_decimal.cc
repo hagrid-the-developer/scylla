@@ -134,7 +134,7 @@ big_decimal operator+(const big_decimal &x, const big_decimal &y)
 
 big_decimal operator/(const big_decimal &x, const ::uint64_t y)
 {
-    // Implementation of Division with Half to Even (aka Bankers) rounding
+    // Implementation of Division with Half to Even (aka Bankers) Rounding
     const boost::multiprecision::cpp_int sign = x._unscaled_value >= 0 ? +1 : -1;
     const boost::multiprecision::cpp_int a = sign * x._unscaled_value;
     const uint64_t r = uint64_t(a % y);
