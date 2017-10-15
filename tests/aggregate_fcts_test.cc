@@ -55,10 +55,11 @@ void create_table(Env &e) {
                       " f double,"
                       " g_0 decimal,"
                       " g_2 decimal,"
-                      " h varint)").get();
+                      " h varint, "
+                      " t text)").get();
 
-        e.execute_cql("INSERT INTO test (a, b, c, d, e, f, g_0, g_2, h) VALUES (1, 1, 1, 1, 1, 1, 1, 1.00, 1)").get();
-        e.execute_cql("INSERT INTO test (a, b, c, d, e, f, g_0, g_2, h) VALUES (2, 2, 2, 2, 2, 2, 2, 2.00, 2)").get();
+        e.execute_cql("INSERT INTO test (a, b, c, d, e, f, g_0, g_2, h, t) VALUES (1, 1, 1, 1, 1, 1, 1, 1.00, 1, 'a')").get();
+        e.execute_cql("INSERT INTO test (a, b, c, d, e, f, g_0, g_2, h, t) VALUES (2, 2, 2, 2, 2, 2, 2, 2.00, 2, 'b')").get();
 }
 
 } /* anonymous namespace */
@@ -121,5 +122,97 @@ SEASTAR_TEST_CASE(test_aggregate_sum) {
                                                           {decimal_type->from_string("3")},
                                                           {decimal_type->from_string("3.00")},
                                                           {varint_type->from_string("3")}});
+    });
+}
+
+SEASTAR_TEST_CASE(test_aggregate_max) {
+    return do_with_cql_env_thread([&] (auto& e) {
+        create_table(e);
+
+        auto msg = e.execute_cql("SELECT max(a), "
+                                 "max(b), "
+                                 "max(c), "
+                                 "max(d), "
+                                 "max(e), "
+                                 "max(f), "
+                                 "max(g_0), "
+                                 "max(g_2), "
+                                 "max(h),"
+                                 "max(t) FROM test").get0();
+
+        assert_that(msg).is_rows().with_size(1).with_row({{byte_type->decompose(int8_t(2))},
+                                                          {short_type->decompose(int16_t(2))},
+                                                          {int32_type->decompose(int32_t(2))},
+                                                          {long_type->decompose(int64_t(2))},
+                                                          {float_type->decompose(2.f)},
+                                                          {double_type->decompose(2.d)},
+                                                          {decimal_type->from_string("2")},
+                                                          {decimal_type->from_string("2.00")},
+                                                          {varint_type->from_string("2")},
+                                                          {utf8_type->from_string("b")}});
+    });
+}
+
+SEASTAR_TEST_CASE(test_aggregate_min) {
+    return do_with_cql_env_thread([&] (auto& e) {
+        create_table(e);
+
+        auto msg = e.execute_cql("SELECT min(a), "
+                                 "min(b), "
+                                 "min(c), "
+                                 "min(d), "
+                                 "min(e), "
+                                 "min(f), "
+                                 "min(g_0), "
+                                 "min(g_2), "
+                                 "min(h),"
+                                 "min(t) FROM test").get0();
+
+        assert_that(msg).is_rows().with_size(1).with_row({{byte_type->decompose(int8_t(1))},
+                                                          {short_type->decompose(int16_t(1))},
+                                                          {int32_type->decompose(int32_t(1))},
+                                                          {long_type->decompose(int64_t(1))},
+                                                          {float_type->decompose(1.f)},
+                                                          {double_type->decompose(1.d)},
+                                                          {decimal_type->from_string("1")},
+                                                          {decimal_type->from_string("1.00")},
+                                                          {varint_type->from_string("1")},
+                                                          {utf8_type->from_string("a")}});
+    });
+}
+
+SEASTAR_TEST_CASE(test_aggregate_count) {
+    return do_with_cql_env_thread([&] (auto& e) {
+
+        e.execute_cql("CREATE TABLE test(a int primary key, b int, c int)").get();
+        e.execute_cql("insert into test(a, b) VALUEs (1, 1)").get();
+        e.execute_cql("insert into test(a, c) VALUEs (2, 2)").get();
+        e.execute_cql("insert into test(a, c) VALUEs (3, 3)").get();
+
+        {
+            auto msg = e.execute_cql("SELECT count(a) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{long_type->decompose(int64_t(3))}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT count(*) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{long_type->decompose(int64_t(3))}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT count(b) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{long_type->decompose(int64_t(1))}});
+        }
+        {
+            auto msg = e.execute_cql("SELECT count(c) FROM test").get0();
+            assert_that(msg).is_rows().with_size(1).with_row({{long_type->decompose(int64_t(2))}});
+        }
+        /*
+        // Scylla doesn't support more occurences of count() function in select statement:
+        //   SELELCT count(*), count(a) ...
+        auto msg = e.execute_cql("SELECT count(a), count(b), count(c), count(*) FROM test").get0();
+        assert_that(msg).is_rows().with_size(2).with_row({{long_type->decompose(int64_t(3))},
+                                                          {long_type->decompose(int64_t(1))},
+                                                          {long_type->decompose(int64_t(2))},
+                                                          {long_type->decompose(int64_t(3))}});
+                                                          */
     });
 }

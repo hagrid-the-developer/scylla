@@ -59,6 +59,14 @@ functions::init() {
         declare(make_to_blob_function(type->get_type()));
         declare(make_from_blob_function(type->get_type()));
     }
+    declare(aggregate_fcts::make_count_function<int8_t>());
+    declare(aggregate_fcts::make_max_function<int8_t>());
+    declare(aggregate_fcts::make_min_function<int8_t>());
+
+    declare(aggregate_fcts::make_count_function<int16_t>());
+    declare(aggregate_fcts::make_max_function<int16_t>());
+    declare(aggregate_fcts::make_min_function<int16_t>());
+
     declare(aggregate_fcts::make_count_function<int32_t>());
     declare(aggregate_fcts::make_max_function<int32_t>());
     declare(aggregate_fcts::make_min_function<int32_t>());
