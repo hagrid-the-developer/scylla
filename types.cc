@@ -3556,7 +3556,7 @@ std::function<data_value(data_value)> make_castas_fctn_from_inet_to_string() {
 // FIXME: Add conversions for counters, after they are fully implemented...
 
 // Map <ToType, FromType> -> castas_fctn
-using castas_fctn_key = std::tuple<data_type, data_type>;
+using castas_fctn_key = std::pair<data_type, data_type>;
 struct castas_fctn_hash {
     std::size_t operator()(const castas_fctn_key& x) const noexcept {
         return boost::hash_value(x);
