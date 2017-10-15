@@ -41,6 +41,7 @@
 
 #pragma once
 
+#include "utils/big_decimal.hh"
 #include "aggregate_function.hh"
 #include "native_aggregate_function.hh"
 
@@ -114,14 +115,14 @@ make_sum_function() {
 template <typename Type>
 class impl_avg_function_for final : public aggregate_function::aggregate {
    Type _sum{};
-   int64_t _count = 0;
+   uint64_t _count = 0;
 public:
     virtual void reset() override {
         _sum = {};
         _count = 0;
     }
     virtual opt_bytes compute(cql_serialization_format sf) override {
-        Type ret = 0;
+        Type ret{};
         if (_count) {
             ret = _sum / _count;
         }

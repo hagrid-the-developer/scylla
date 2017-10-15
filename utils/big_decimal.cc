@@ -94,3 +94,46 @@ int big_decimal::compare(const big_decimal& other) const
     boost::multiprecision::cpp_int y = other._unscaled_value * boost::multiprecision::pow(rescale, max_scale - other._scale);
     return x == y ? 0 : x < y ? -1 : 1;
 }
+
+big_decimal& big_decimal::operator+=(const big_decimal &other)
+{
+    std::cerr << "XYZ: scale: " << _scale << "; other._scale: " << other._scale << std::endl;
+    std::cerr << "XYZ: this: " << _unscaled_value.str() << "; other: " << other._unscaled_value.str() << std::endl;
+    if (_scale == other._scale) {
+        _unscaled_value += other._unscaled_value;
+    } else {
+        boost::multiprecision::cpp_int rescale(10);
+        auto max_scale = std::max(_scale, other._scale);
+    std::cerr << "XYZ: max_scale: " << max_scale << std::endl;
+        boost::multiprecision::cpp_int u = _unscaled_value * boost::multiprecision::pow(rescale,  max_scale - _scale);
+    std::cerr << "XYZ: u: " << u << std::endl;
+        boost::multiprecision::cpp_int v = other._unscaled_value * boost::multiprecision::pow(rescale, max_scale - other._scale);
+    std::cerr << "XYZ: v: " << v << std::endl;
+        _scale = max_scale;
+        _unscaled_value = u + v;
+    }
+    std::cerr << "XYZ: result-this: " << _unscaled_value.str() << std::endl;
+    return *this;
+}
+
+// FIXME: XYZ: Remove this...
+#if 0
+big_decimal operator+(const big_decimal &x, const big_decimal &y)
+{
+    if (x._scale == y._scale) {
+        return big_decimal(x._scale, x._unscaled_value + y._unscaled_value);
+    } else {
+        boost::multiprecision::cpp_int rescale(10);
+        auto min_scale = std::min(x._scale, y._scale);
+        auto u = x._unscaled_value * boost::multiprecision::pow(rescale, x._scale - min_scale);
+        auto v = y._unscaled_value * boost::multiprecision::pow(rescale, y._scale - min_scale);
+        return big_decimal(min_scale, u + v);
+    }
+}
+#endif
+
+big_decimal operator/(const big_decimal &x, const ::uint64_t y)
+{
+    std::cerr << "XYZ: division: " << x.to_string() << "/" << y << " = " << (x._unscaled_value + y / 2) / y << std::endl;
+    return big_decimal(x._scale, (x._unscaled_value + y / 2) / y);
+}
