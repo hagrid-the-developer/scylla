@@ -639,6 +639,7 @@ pure_boost_tests = set([
     'tests/vint_serialization_test',
     'tests/compress_test',
     'tests/chunked_vector_test',
+    'tests/big_decimal_test',
 ])
 
 tests_not_using_seastar_test_framework = set([
