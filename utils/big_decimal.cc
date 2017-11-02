@@ -116,22 +116,6 @@ big_decimal& big_decimal::operator+=(const big_decimal &other)
     return *this;
 }
 
-// FIXME: XYZ: Remove this...
-#if 0
-big_decimal operator+(const big_decimal &x, const big_decimal &y)
-{
-    if (x._scale == y._scale) {
-        return big_decimal(x._scale, x._unscaled_value + y._unscaled_value);
-    } else {
-        boost::multiprecision::cpp_int rescale(10);
-        auto min_scale = std::min(x._scale, y._scale);
-        auto u = x._unscaled_value * boost::multiprecision::pow(rescale, x._scale - min_scale);
-        auto v = y._unscaled_value * boost::multiprecision::pow(rescale, y._scale - min_scale);
-        return big_decimal(min_scale, u + v);
-    }
-}
-#endif
-
 big_decimal operator/(const big_decimal &x, const ::uint64_t y)
 {
     // Implementation of Division with Half to Even (aka Bankers) Rounding
