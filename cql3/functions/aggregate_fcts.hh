@@ -41,6 +41,7 @@
 
 #pragma once
 
+#include "utils/big_decimal.hh"
 #include "aggregate_function.hh"
 #include "native_aggregate_function.hh"
 
@@ -121,7 +122,7 @@ public:
         _count = 0;
     }
     virtual opt_bytes compute(cql_serialization_format sf) override {
-        Type ret = 0;
+        Type ret{};
         if (_count) {
             ret = _sum / _count;
         }
