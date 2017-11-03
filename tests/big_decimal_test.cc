@@ -117,4 +117,7 @@ BOOST_AUTO_TEST_CASE(test_big_decimal_assignadd) {
     test_assignadd("1", "-1", "0");
     test_assignadd("1.00", "-1.00", "0.00");
     test_assignadd("1.000", "-1.000", "0.000");
+    test_assignadd("0.0", "0.000", "0.000");
+    test_assignadd("1.0", "1.000", "2.000");
+    test_assignadd("-1.0", "-1.000", "-2.000");
 }
