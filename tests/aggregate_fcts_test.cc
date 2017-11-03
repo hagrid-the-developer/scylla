@@ -103,15 +103,6 @@ SEASTAR_TEST_CASE(test_aggregate_sum) {
                                  "sum(g_0), "
                                  "sum(g_2), "
                                  "sum(h) FROM test").get0();
-        std::cerr << "XYZ: [0]: " <<  byte_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front().front().value()) << std::endl;
-        std::cerr << "XYZ: [1]: " <<  short_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[1].value()) << std::endl;
-        std::cerr << "XYZ: [2]: " <<  int32_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[2].value()) << std::endl;
-        std::cerr << "XYZ: [3]: " <<  long_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[3].value()) << std::endl;
-        std::cerr << "XYZ: [4]: " <<  float_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[4].value()) << std::endl;
-        std::cerr << "XYZ: [5]: " <<  double_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[5].value()) << std::endl;
-        std::cerr << "XYZ: [6]: " <<  decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[6].value()) << std::endl;
-        std::cerr << "XYZ: [7]: " <<  decimal_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[7].value()) << std::endl;
-        std::cerr << "XYZ: [8]: " <<  varint_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front()[8].value()) << std::endl;
 
         assert_that(msg).is_rows().with_size(1).with_row({{byte_type->decompose(int8_t(3))},
                                                           {short_type->decompose(int16_t(3))},
