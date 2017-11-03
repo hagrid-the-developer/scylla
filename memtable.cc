@@ -309,6 +309,10 @@ public:
             });
         });
     }
+    virtual future<> fast_forward_to(const dht::partition_range& pr) override {
+        return _delegate_range ? _delegate.fast_forward_to(pr)
+                               : iterator_reader::fast_forward_to(pr);
+    }
 };
 
 void memtable::add_flushed_memory(uint64_t delta) {
@@ -372,6 +376,10 @@ public:
         _accounter.update_bytes_read(sr.external_memory_usage());
     }
 
+    void operator()(const partition_start& ph) {}
+
+    void operator()(const partition_end& eop) {}
+
     void operator()(const clustering_row& cr) {
         // Every clustering row is stored in a rows_entry object, and that has some significant
         // overhead - so add it here. We will be a bit short on our estimate because we can't know
@@ -402,7 +410,7 @@ public:
                 if (!e) {
                     return make_ready_future<streamed_mutation_opt>(stdx::nullopt);
                 } else {
-                    auto cr = query::clustering_key_filter_ranges::get_ranges(*schema(), query::full_slice, e->key().key());
+                    auto cr = query::clustering_key_filter_ranges::get_ranges(*schema(), schema()->full_slice(), e->key().key());
                     auto snp = e->partition().read(region(), schema());
                     auto mpsr = make_partition_snapshot_reader<partition_snapshot_accounter>(schema(), e->key(), std::move(cr),
                             snp, region(), read_section(), mtbl(), streamed_mutation::forwarding::no, _flushed_memory);
@@ -447,8 +455,9 @@ memtable::make_flush_reader(schema_ptr s, const io_priority_class& pc) {
     if (group()) {
         return make_mutation_reader<flush_reader>(std::move(s), shared_from_this());
     } else {
+        auto& full_slice = s->full_slice();
         return make_mutation_reader<scanning_reader>(std::move(s), shared_from_this(),
-            query::full_partition_range, query::full_slice, pc, streamed_mutation::forwarding::no, mutation_reader::forwarding::no);
+            query::full_partition_range, full_slice, pc, streamed_mutation::forwarding::no, mutation_reader::forwarding::no);
     }
 }
 

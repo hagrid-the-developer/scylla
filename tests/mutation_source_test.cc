@@ -27,6 +27,7 @@
 #include "mutation_source_test.hh"
 #include "counters.hh"
 #include "simple_schema.hh"
+#include "flat_mutation_reader.hh"
 
 // partitions must be sorted by decorated key
 static void require_no_token_duplicates(const std::vector<mutation>& partitions) {
@@ -125,7 +126,7 @@ static void test_streamed_mutation_forwarding_guarantees(populate_fn populate) {
         BOOST_TEST_MESSAGE("Creating new streamed_mutation");
         mutation_reader rd = ms(s,
             query::full_partition_range,
-            query::full_slice,
+            s->full_slice(),
             default_priority_class(),
             nullptr,
             streamed_mutation::forwarding::yes);
@@ -262,7 +263,7 @@ static void test_fast_forwarding_across_partitions_to_empty_range(populate_fn po
     auto pr = dht::partition_range::make({keys[0]}, {keys[1]});
     mutation_reader rd = ms(s,
         pr,
-        query::full_slice,
+        s->full_slice(),
         default_priority_class(),
         nullptr,
         streamed_mutation::forwarding::no,
@@ -466,7 +467,7 @@ static void test_streamed_mutation_forwarding_across_range_tombstones(populate_f
     mutation_source ms = populate(s, std::vector<mutation>({m}));
     mutation_reader rd = ms(s,
         query::full_partition_range,
-        query::full_slice,
+        s->full_slice(),
         default_priority_class(),
         nullptr,
         streamed_mutation::forwarding::yes);
@@ -801,12 +802,12 @@ static void test_clustering_slices(populate_fn populate) {
     // Test out-of-range partition keys
     {
         auto pr = dht::partition_range::make_singular(keys[0]);
-        assert_that(ds(s, pr, query::full_slice))
+        assert_that(ds(s, pr, s->full_slice()))
             .produces_eos_or_empty_mutation();
     }
     {
         auto pr = dht::partition_range::make_singular(keys[2]);
-        assert_that(ds(s, pr, query::full_slice))
+        assert_that(ds(s, pr, s->full_slice()))
             .produces_eos_or_empty_mutation();
     }
 }
@@ -826,7 +827,7 @@ static void test_query_only_static_row(populate_fn populate) {
     // fully populate cache
     {
         auto prange = dht::partition_range::make_ending_with(dht::ring_position(m1.decorated_key()));
-        assert_that(ms(s.schema(), prange, query::full_slice))
+        assert_that(ms(s.schema(), prange, s.schema()->full_slice()))
             .produces(m1)
             .produces_end_of_stream();
     }
@@ -843,7 +844,7 @@ static void test_query_only_static_row(populate_fn populate) {
     }
 }
 
-void run_mutation_source_tests(populate_fn populate) {
+void run_mutation_reader_tests(populate_fn populate) {
     test_fast_forwarding_across_partitions_to_empty_range(populate);
     test_clustering_slices(populate);
     test_streamed_mutation_fragments_have_monotonic_positions(populate);
@@ -853,6 +854,34 @@ void run_mutation_source_tests(populate_fn populate) {
     test_streamed_mutation_forwarding_is_consistent_with_slicing(populate);
     test_range_queries(populate);
     test_query_only_static_row(populate);
+}
+
+void run_conversion_to_mutation_reader_tests(populate_fn populate) {
+    populate_fn populate_with_flat_mutation_reader_conversion = [&populate] (schema_ptr s, const std::vector<mutation>& m) {
+        auto source = populate(s, m);
+        return mutation_source([source] (schema_ptr s,
+                                         const dht::partition_range& range,
+                                         const query::partition_slice& slice,
+                                         const io_priority_class& pc,
+                                         tracing::trace_state_ptr trace_state,
+                                         streamed_mutation::forwarding fwd,
+                                         mutation_reader::forwarding fwd_mr)
+                               {
+                                   auto&& res = source(s, range, slice, pc, std::move(trace_state), fwd, fwd_mr);
+                                   return mutation_reader_from_flat_mutation_reader(
+                                       s, flat_mutation_reader_from_mutation_reader(s, std::move(res), fwd));
+                               });
+    };
+    run_mutation_reader_tests(populate_with_flat_mutation_reader_conversion);
+}
+
+void run_flat_mutation_reader_tests(populate_fn populate) {
+    run_conversion_to_mutation_reader_tests(populate);
+}
+
+void run_mutation_source_tests(populate_fn populate) {
+    run_mutation_reader_tests(populate);
+    run_flat_mutation_reader_tests(populate);
 }
 
 struct mutation_sets {

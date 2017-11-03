@@ -290,25 +290,43 @@ public:
     future<streamed_mutation_opt> read_row(
         schema_ptr schema,
         dht::ring_position_view key,
-        const query::partition_slice& slice = query::full_slice,
+        const query::partition_slice& slice,
         const io_priority_class& pc = default_priority_class(),
+        reader_resource_tracker resource_tracker = no_resource_tracking(),
         streamed_mutation::forwarding fwd = streamed_mutation::forwarding::no);
+
+    future<streamed_mutation_opt> read_row(schema_ptr schema, dht::ring_position_view key) {
+        auto& full_slice = schema->full_slice();
+        return read_row(std::move(schema), std::move(key), full_slice);
+    }
 
     future<streamed_mutation_opt> read_row(
         schema_ptr schema,
         const sstables::key& key,
-        const query::partition_slice& slice = query::full_slice,
+        const query::partition_slice& slice,
         const io_priority_class& pc = default_priority_class(),
+        reader_resource_tracker resource_tracker = no_resource_tracking(),
         streamed_mutation::forwarding fwd = streamed_mutation::forwarding::no);
+
+    future<streamed_mutation_opt> read_row(schema_ptr schema, const sstables::key& key) {
+        auto& full_slice = schema->full_slice();
+        return read_row(std::move(schema), key, full_slice);
+    }
 
     // Returns a mutation_reader for given range of partitions
     mutation_reader read_range_rows(
         schema_ptr schema,
         const dht::partition_range& range,
-        const query::partition_slice& slice = query::full_slice,
+        const query::partition_slice& slice,
         const io_priority_class& pc = default_priority_class(),
+        reader_resource_tracker resource_tracker = no_resource_tracking(),
         streamed_mutation::forwarding fwd = streamed_mutation::forwarding::no,
         ::mutation_reader::forwarding fwd_mr = ::mutation_reader::forwarding::yes);
+
+    mutation_reader read_range_rows(schema_ptr schema, const dht::partition_range& range) {
+        auto& full_slice = schema->full_slice();
+        return read_range_rows(std::move(schema), range, full_slice);
+    }
 
     // read_rows() returns each of the rows in the sstable, in sequence,
     // converted to a "mutation" data structure.
@@ -485,6 +503,7 @@ private:
     uint64_t _bytes_on_disk = 0;
     db_clock::time_point _data_file_write_time;
     std::vector<nonwrapping_range<bytes_view>> _clustering_components_ranges;
+    std::vector<unsigned> _shards;
     stdx::optional<dht::decorated_key> _first;
     stdx::optional<dht::decorated_key> _last;
 
@@ -583,8 +602,6 @@ private:
 
     future<> create_data();
 
-    future<index_list> read_indexes(uint64_t summary_idx, const io_priority_class& pc);
-
     // Return an input_stream which reads exactly the specified byte range
     // from the data file (after uncompression, if the file is compressed).
     // Unlike data_read() below, this method does not read the entire byte
@@ -594,7 +611,7 @@ private:
     // about the buffer size to read, and where exactly to stop reading
     // (even when a large buffer size is used).
     input_stream<char> data_stream(uint64_t pos, size_t len, const io_priority_class& pc,
-                                   lw_shared_ptr<file_input_stream_history> history);
+                                   reader_resource_tracker resource_tracker, lw_shared_ptr<file_input_stream_history> history);
 
     // Read exactly the specific byte range from the data file (after
     // uncompression, if the file is compressed). This can be used to read
@@ -625,6 +642,8 @@ private:
     void write_deletion_time(file_writer& out, const tombstone t);
 
     stdx::optional<std::pair<uint64_t, uint64_t>> get_sample_indexes_for_range(const dht::token_range& range);
+
+    std::vector<unsigned> compute_shards_for_this_sstable() const;
 public:
     std::unique_ptr<index_reader> get_index_reader(const io_priority_class& pc);
 
@@ -689,7 +708,9 @@ public:
         const compaction_metadata& s = *static_cast<compaction_metadata *>(p.get());
         return s;
     }
-    std::vector<unsigned> get_shards_for_this_sstable() const;
+    const std::vector<unsigned>& get_shards_for_this_sstable() const {
+        return _shards;
+    }
 
     uint32_t get_sstable_level() const {
         return get_stats_metadata().sstable_level;
@@ -709,8 +730,6 @@ public:
     // Return sstable key range as range<partition_key> reading only the summary component.
     future<range<partition_key>>
     get_sstable_key_range(const schema& s);
-
-    future<std::vector<shard_id>> get_owning_shards_from_unloaded();
 
     const std::vector<nonwrapping_range<bytes_view>>& clustering_components_ranges() const;
 

@@ -152,7 +152,7 @@ public:
                             lw_shared_ptr<read_context> ctx,
                             lw_shared_ptr<partition_snapshot> snp,
                             row_cache& cache)
-        : streamed_mutation::impl(std::move(s), dk, snp->partition_tombstone())
+        : streamed_mutation::impl(std::move(s), std::move(dk), snp->partition_tombstone())
         , _snp(std::move(snp))
         , _position_cmp(*_schema)
         , _ck_ranges(std::move(crr))
@@ -177,7 +177,9 @@ inline
 future<> cache_streamed_mutation::process_static_row() {
     if (_snp->version()->partition().static_row_continuous()) {
         _read_context->cache().on_row_hit();
-        row sr = _snp->static_row();
+        row sr = _lsa_manager.run_in_read_section([this] {
+            return _snp->static_row();
+        });
         if (!sr.empty()) {
             push_mutation_fragment(mutation_fragment(static_row(std::move(sr))));
         }

@@ -178,28 +178,11 @@ mutation_reader make_combined_reader(mutation_reader&& a, mutation_reader&& b, m
 mutation_reader make_reader_returning(mutation, streamed_mutation::forwarding fwd = streamed_mutation::forwarding::no);
 mutation_reader make_reader_returning(streamed_mutation);
 mutation_reader make_reader_returning_many(std::vector<mutation>,
-    const query::partition_slice& slice = query::full_slice,
+    const query::partition_slice& slice,
     streamed_mutation::forwarding fwd = streamed_mutation::forwarding::no);
-mutation_reader make_reader_returning_many(std::vector<mutation>, const dht::partition_range&);
+mutation_reader make_reader_returning_many(std::vector<mutation>, const dht::partition_range& = query::full_partition_range);
 mutation_reader make_reader_returning_many(std::vector<streamed_mutation>);
 mutation_reader make_empty_reader();
-
-struct restricted_mutation_reader_config {
-    semaphore* sem = nullptr;
-    std::chrono::nanoseconds timeout = {};
-    size_t max_queue_length = std::numeric_limits<size_t>::max();
-    std::function<void ()> raise_queue_overloaded_exception = default_raise_queue_overloaded_exception;
-
-    static void default_raise_queue_overloaded_exception() {
-        throw std::runtime_error("restricted mutation reader queue overload");
-    }
-};
-
-// Restricts a given `mutation_reader` to a concurrency limited according to settings in
-// a restricted_mutation_reader_config.  These settings include a semaphore for limiting the number
-// of active concurrent readers, a timeout for inactive readers, and a maximum queue size for
-// inactive readers.
-mutation_reader make_restricted_reader(const restricted_mutation_reader_config& config, unsigned weight, mutation_reader&& base);
 
 /*
 template<typename T>
@@ -350,14 +333,19 @@ public:
     // All parameters captured by reference must remain live as long as returned
     // mutation_reader or streamed_mutation obtained through it are alive.
     mutation_reader operator()(schema_ptr s,
-        partition_range range = query::full_partition_range,
-        const query::partition_slice& slice = query::full_slice,
+        partition_range range,
+        const query::partition_slice& slice,
         io_priority pc = default_priority_class(),
         tracing::trace_state_ptr trace_state = nullptr,
         streamed_mutation::forwarding fwd = streamed_mutation::forwarding::no,
         mutation_reader::forwarding fwd_mr = mutation_reader::forwarding::yes) const
     {
         return (*_fn)(std::move(s), range, slice, pc, std::move(trace_state), fwd, fwd_mr);
+    }
+
+    mutation_reader operator()(schema_ptr s, partition_range range = query::full_partition_range) const {
+        auto& full_slice = s->full_slice();
+        return (*this)(std::move(s), range, full_slice);
     }
 
     partition_presence_checker make_partition_presence_checker() {
@@ -391,6 +379,45 @@ public:
 mutation_source make_empty_mutation_source();
 snapshot_source make_empty_snapshot_source();
 
+struct restricted_mutation_reader_config {
+    semaphore* resources_sem = nullptr;
+    uint64_t* active_reads = nullptr;
+    std::chrono::nanoseconds timeout = {};
+    size_t max_queue_length = std::numeric_limits<size_t>::max();
+    std::function<void ()> raise_queue_overloaded_exception = default_raise_queue_overloaded_exception;
+
+    static void default_raise_queue_overloaded_exception() {
+        throw std::runtime_error("restricted mutation reader queue overload");
+    }
+};
+
+// Creates a restricted reader whose resource usages will be tracked
+// during it's lifetime. If there are not enough resources (dues to
+// existing readers) to create the new reader, it's construction will
+// be deferred until there are sufficient resources.
+// The internal reader once created will not be hindered in it's work
+// anymore. Reusorce limits are determined by the config which contains
+// a semaphore to track and limit the memory usage of readers. It also
+// contains a timeout and a maximum queue size for inactive readers
+// whose construction is blocked.
+mutation_reader make_restricted_reader(const restricted_mutation_reader_config& config,
+        mutation_source ms,
+        schema_ptr s,
+        const dht::partition_range& range,
+        const query::partition_slice& slice,
+        const io_priority_class& pc = default_priority_class(),
+        tracing::trace_state_ptr trace_state = nullptr,
+        streamed_mutation::forwarding fwd = streamed_mutation::forwarding::no,
+        mutation_reader::forwarding fwd_mr = mutation_reader::forwarding::yes);
+
+inline mutation_reader make_restricted_reader(const restricted_mutation_reader_config& config,
+        mutation_source ms,
+        schema_ptr s,
+        const dht::partition_range& range = query::full_partition_range) {
+    auto& full_slice = s->full_slice();
+    return make_restricted_reader(config, std::move(ms), std::move(s), range, full_slice);
+}
+
 template<>
 struct move_constructor_disengages<mutation_source> {
     enum { value = true };
@@ -411,7 +438,7 @@ future<stop_iteration> do_consume_streamed_mutation_flattened(streamed_mutation&
             }
             f.get();
         } else {
-            if (sm.pop_mutation_fragment().consume(c) == stop_iteration::yes) {
+            if (sm.pop_mutation_fragment().consume_streamed_mutation(c) == stop_iteration::yes) {
                 break;
             }
         }
@@ -419,17 +446,20 @@ future<stop_iteration> do_consume_streamed_mutation_flattened(streamed_mutation&
     return make_ready_future<stop_iteration>(c.consume_end_of_partition());
 }
 
-/*
+GCC6_CONCEPT(
 template<typename T>
 concept bool FlattenedConsumer() {
-    return StreamedMutationConsumer() && requires(T obj, const dht::decorated_key& dk) {
+    return StreamedMutationConsumer<T>() && requires(T obj, const dht::decorated_key& dk) {
         obj.consume_new_partition(dk);
         obj.consume_end_of_partition();
     };
 }
-*/
-template<typename FlattenedConsumer>
-auto consume_flattened(mutation_reader mr, FlattenedConsumer&& c, bool reverse_mutations = false)
+)
+template<typename Consumer>
+GCC6_CONCEPT(
+    requires FlattenedConsumer<Consumer>()
+)
+auto consume_flattened(mutation_reader mr, Consumer&& c, bool reverse_mutations = false)
 {
     return do_with(std::move(mr), std::move(c), stdx::optional<streamed_mutation>(), [reverse_mutations] (auto& mr, auto& c, auto& sm) {
         return repeat([&, reverse_mutations] {
@@ -488,7 +518,7 @@ auto consume_flattened_in_thread(mutation_reader& mr, FlattenedConsumer& c, Stre
                 }
                 sm.fill_buffer().get0();
             } else {
-                if (sm.pop_mutation_fragment().consume(c) == stop_iteration::yes) {
+                if (sm.pop_mutation_fragment().consume_streamed_mutation(c) == stop_iteration::yes) {
                     break;
                 }
             }
@@ -532,3 +562,7 @@ make_multi_range_reader(schema_ptr s, mutation_source source, const dht::partiti
                         const query::partition_slice& slice, const io_priority_class& pc = default_priority_class(),
                         tracing::trace_state_ptr trace_state = nullptr, streamed_mutation::forwarding fwd = streamed_mutation::forwarding::no,
                         mutation_reader::forwarding fwd_mr = mutation_reader::forwarding::yes);
+
+class flat_mutation_reader;
+
+mutation_reader mutation_reader_from_flat_mutation_reader(schema_ptr s, flat_mutation_reader&&);
