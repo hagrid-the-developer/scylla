@@ -42,4 +42,12 @@ public:
     sstring to_string() const;
 
     int compare(const big_decimal& other) const;
+
+    big_decimal& operator+=(const big_decimal &other);
+    friend big_decimal operator/(const big_decimal &x, const ::uint64_t y);
+    friend bool operator<(const big_decimal &x, const big_decimal &y) { return x.compare(y) < 0; }
+    friend bool operator<=(const big_decimal &x, const big_decimal &y) { return x.compare(y) <= 0; }
+    friend bool operator==(const big_decimal &x, const big_decimal &y) { return x.compare(y) == 0; }
+    friend bool operator>=(const big_decimal &x, const big_decimal &y) { return x.compare(y) >= 0; }
+    friend bool operator>(const big_decimal &x, const big_decimal &y) { return x.compare(y) > 0; }
 };

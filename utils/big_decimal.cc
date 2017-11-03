@@ -94,3 +94,37 @@ int big_decimal::compare(const big_decimal& other) const
     boost::multiprecision::cpp_int y = other._unscaled_value * boost::multiprecision::pow(rescale, max_scale - other._scale);
     return x == y ? 0 : x < y ? -1 : 1;
 }
+
+big_decimal& big_decimal::operator+=(const big_decimal &other)
+{
+    if (_scale == other._scale) {
+        _unscaled_value += other._unscaled_value;
+    } else {
+        boost::multiprecision::cpp_int rescale(10);
+        auto max_scale = std::max(_scale, other._scale);
+        boost::multiprecision::cpp_int u = _unscaled_value * boost::multiprecision::pow(rescale,  max_scale - _scale);
+        boost::multiprecision::cpp_int v = other._unscaled_value * boost::multiprecision::pow(rescale, max_scale - other._scale);
+        _scale = max_scale;
+        _unscaled_value = u + v;
+    }
+    return *this;
+}
+
+big_decimal operator/(const big_decimal &x, const ::uint64_t y)
+{
+    // Implementation of Division with Half to Even (aka Bankers) Rounding
+    const boost::multiprecision::cpp_int sign = x._unscaled_value >= 0 ? +1 : -1;
+    const boost::multiprecision::cpp_int a = sign * x._unscaled_value;
+    const uint64_t r = uint64_t(a % y);
+
+    boost::multiprecision::cpp_int q = a / y;
+    if (2*r < y) {
+        ;
+    } else if (2*r > y) {
+        q += 1;
+    } else if (q % 2 == 1) {
+        q += 1;
+    }
+
+    return big_decimal(x._scale, sign * q);
+}
