@@ -111,26 +111,7 @@ big_decimal& big_decimal::operator+=(const big_decimal &other)
     return *this;
 }
 
-big_decimal operator/(const big_decimal &x, const ::uint64_t y)
-{
-    // Implementation of Division with Half to Even (aka Bankers) Rounding
-    const boost::multiprecision::cpp_int sign = x._unscaled_value >= 0 ? +1 : -1;
-    const boost::multiprecision::cpp_int a = sign * x._unscaled_value;
-    const uint64_t r = uint64_t(a % y);
-
-    boost::multiprecision::cpp_int q = a / y;
-    if (2*r < y) {
-        ;
-    } else if (2*r > y) {
-        q += 1;
-    } else if (q % 2 == 1) {
-        q += 1;
-    }
-
-    return big_decimal(x._scale, sign * q);
-}
-
-big_decimal big_decimal::div(const ::uint64_t y, rounding_mode mode) const
+big_decimal big_decimal::div(const ::uint64_t y, const rounding_mode mode) const
 {
     if (mode != rounding_mode::HALF_EVEN) {
         assert(0);
@@ -142,11 +123,19 @@ big_decimal big_decimal::div(const ::uint64_t y, rounding_mode mode) const
     const uint64_t r = uint64_t(a % y);
 
     boost::multiprecision::cpp_int q = a / y;
+
+    /*
+     * Value r/y is fractional part of (*this)/y that is used to determine
+     *   the direction of rounding.
+     * For rounding one has to consider r/y cmp 1/2 or equivalently:
+     *   2*r cmp y.
+     */
     if (2*r < y) {
-        ;
+        /* Number has its final value */
     } else if (2*r > y) {
         q += 1;
     } else if (q % 2 == 1) {
+        /* Change to closest even number */
         q += 1;
     }
 
