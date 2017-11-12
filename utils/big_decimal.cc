@@ -20,6 +20,7 @@
  */
 
 #include "big_decimal.hh"
+#include <cassert>
 #include "marshal_exception.hh"
 
 #include <regex>
@@ -104,8 +105,8 @@ big_decimal& big_decimal::operator+=(const big_decimal &other)
         auto max_scale = std::max(_scale, other._scale);
         boost::multiprecision::cpp_int u = _unscaled_value * boost::multiprecision::pow(rescale,  max_scale - _scale);
         boost::multiprecision::cpp_int v = other._unscaled_value * boost::multiprecision::pow(rescale, max_scale - other._scale);
-        _scale = max_scale;
         _unscaled_value = u + v;
+        _scale = max_scale;
     }
     return *this;
 }
@@ -127,4 +128,27 @@ big_decimal operator/(const big_decimal &x, const ::uint64_t y)
     }
 
     return big_decimal(x._scale, sign * q);
+}
+
+big_decimal big_decimal::div(const ::uint64_t y, rounding_mode mode) const
+{
+    if (mode != rounding_mode::HALF_EVEN) {
+        assert(0);
+    }
+
+    // Implementation of Division with Half to Even (aka Bankers) Rounding
+    const boost::multiprecision::cpp_int sign = _unscaled_value >= 0 ? +1 : -1;
+    const boost::multiprecision::cpp_int a = sign * _unscaled_value;
+    const uint64_t r = uint64_t(a % y);
+
+    boost::multiprecision::cpp_int q = a / y;
+    if (2*r < y) {
+        ;
+    } else if (2*r > y) {
+        q += 1;
+    } else if (q % 2 == 1) {
+        q += 1;
+    }
+
+    return big_decimal(_scale, sign * q);
 }
