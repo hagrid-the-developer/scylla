@@ -112,8 +112,7 @@ private:
                     result.options.begin(), result.options.end(),
                     [&key](const boost::program_options::basic_option<CharT>& test) {
             return test.string_key == key;
-        }
-        );
+        });
 
         if (option_iter == result.options.end()) {
             result.options.emplace_back();
@@ -336,6 +335,10 @@ utils::config_file::add_options(bpo::options_description_easy_init& init) {
     return init;
 }
 
+void utils::config_file::add_seastar_options(const boost::program_options::options_description& seastar_opts) {
+    _seastar_opts.add(seastar_opts);
+}
+
 void utils::config_file::read_from_yaml(const sstring& yaml, error_handler h) {
     read_from_yaml(yaml.c_str(), std::move(h));
 }
@@ -392,7 +395,7 @@ void utils::config_file::read_from_yaml(const char* yaml, error_handler h) {
         }
     }
 }
-boost::program_options::parsed_options utils::config_file::read_from_yaml_sync(const char* yaml, const boost::program_options::options_description& seastar_opts, error_handler h) {
+boost::program_options::parsed_options utils::config_file::read_from_yaml_sync(const char* yaml, error_handler h) {
     std::unordered_map<sstring, cfg_ref> values;
 
     if (!h) {
@@ -400,7 +403,7 @@ boost::program_options::parsed_options utils::config_file::read_from_yaml_sync(c
             throw std::invalid_argument(msg + " : " + opt);
         };
     }
-    bpo::parsed_options seastar_po{&seastar_opts};
+    bpo::parsed_options seastar_po{&_seastar_opts};
     /*
      * Note: this is not very "half-fault" tolerant. I.e. there could be
      * yaml syntax errors that origin handles and still sets the options
@@ -414,7 +417,7 @@ boost::program_options::parsed_options utils::config_file::read_from_yaml_sync(c
 
         if (label == "seastar") {
             std::cerr << "Reading seastar section..." << std::endl;
-            seastar_po = BpoYaml{seastar_opts}.parse(node.second);
+            seastar_po = BpoYaml{_seastar_opts}.parse(node.second);
             continue;
         }
         auto i = std::find_if(_cfgs.begin(), _cfgs.end(), [&label](const config_src& cfg) { return cfg.name() == label; });
@@ -488,7 +491,7 @@ future<> utils::config_file::read_from_file(const sstring& filename, error_handl
     });
 }
 
-boost::program_options::parsed_options utils::config_file::read_from_file_sync(const sstring& filename, const boost::program_options::options_description& seastar_opts, error_handler h) {
+boost::program_options::parsed_options utils::config_file::read_from_file_sync(const sstring& filename, error_handler h) {
     std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
     std::ifstream stream(filename);
     std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
@@ -496,7 +499,7 @@ boost::program_options::parsed_options utils::config_file::read_from_file_sync(c
     std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
     ss << stream.rdbuf();
     std::cerr << "XYZ: Reading config file: " << ss.str() << std::endl;
-    return read_from_yaml_sync(ss.str().c_str(), seastar_opts, h);
+    return read_from_yaml_sync(ss.str().c_str(), h);
 }
 
 

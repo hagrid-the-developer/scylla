@@ -101,7 +101,8 @@ void read_config(bpo::variables_map& opts, const boost::program_options::options
         file = relative_conf_dir("scylla.yaml").string();
     }
     std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
-    const bpo::parsed_options seastar_cfg = cfg.read_from_file_sync(file, seastar_opts, [](auto & opt, auto & msg, auto status) {
+    cfg.add_seastar_options(seastar_opts);
+    const bpo::parsed_options seastar_cfg = cfg.read_from_file_sync(file, [](auto & opt, auto & msg, auto status) {
         auto level = log_level::warn;
         if (status.value_or(db::config::value_status::Invalid) != db::config::value_status::Invalid) {
             level = log_level::error;

@@ -143,6 +143,8 @@ public:
     boost::program_options::options_description_easy_init&
     add_options(boost::program_options::options_description_easy_init&);
 
+    void add_seastar_options(const boost::program_options::options_description& _seastar_opts);
+
     /**
      * Default behaviour for yaml parser is to throw on
      * unknown stuff, invalid opts or conversion errors.
@@ -160,10 +162,10 @@ public:
 
     void read_from_yaml(const sstring&, error_handler = {});
     void read_from_yaml(const char *, error_handler = {});
-    boost::program_options::parsed_options read_from_yaml_sync(const char* filename, const boost::program_options::options_description& seastar_opts, error_handler h);
+    boost::program_options::parsed_options read_from_yaml_sync(const char* filename, error_handler h);
     future<> read_from_file(const sstring&, error_handler = {});
     future<> read_from_file(file, error_handler = {});
-    boost::program_options::parsed_options read_from_file_sync(const sstring& filename, const boost::program_options::options_description& seastar_opts, error_handler h);
+    boost::program_options::parsed_options read_from_file_sync(const sstring& filename, error_handler h);
 
     using configs = std::vector<cfg_ref>;
 
@@ -172,6 +174,8 @@ public:
 private:
     configs
         _cfgs;
+
+    boost::program_options::options_description _seastar_opts;
 };
 
 }
