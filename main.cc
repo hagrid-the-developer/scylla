@@ -92,15 +92,11 @@ void read_config(bpo::variables_map& opts, const boost::program_options::options
     using namespace boost::filesystem;
     sstring file;
 
-    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
     if (opts.count("options-file") > 0) {
-    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
         file = opts["options-file"].as<sstring>();
     } else {
-    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
         file = relative_conf_dir("scylla.yaml").string();
     }
-    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
     cfg.add_seastar_options(seastar_opts);
     const bpo::parsed_options seastar_cfg = cfg.read_from_file(file, [](auto & opt, auto & msg, auto status) {
         auto level = log_level::warn;
@@ -115,6 +111,7 @@ void read_config(bpo::variables_map& opts, const boost::program_options::options
         std::string on = e.get_option_name();
         std::replace(on.begin(), on.end(), '-', '_');
         e.set_option_name(on);
+        startlog.error("Could not read seastar section in {}: {}", file, e.what());
         throw e;
     }
 

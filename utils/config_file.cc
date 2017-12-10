@@ -45,91 +45,65 @@ namespace {
 
 class BpoYaml {
 public:
-    BpoYaml(const boost::program_options::options_description& desc, bool allow_unregistered = false)
-        : _desc(desc)
-        , _allow_unregistered(allow_unregistered) {
+    BpoYaml(boost::program_options::parsed_options& po)
+        : _po(po) {
     }
 
-    template <typename CharT = char>
-    boost::program_options::basic_parsed_options<CharT> parse(const YAML::Node& node) {
-            boost::program_options::basic_parsed_options<CharT> result(&_desc);
-            parseSubnode(node, "", result);
-            return result;
+    void parse(const YAML::Node& node) {
+            parse_subnode(node);
     }
 
 private:
-
-    template <typename CharT>
-    void parseSubnode(const YAML::Node& node, const std::string& key, boost::program_options::basic_parsed_options<CharT>& result) {
+    void parse_subnode(const YAML::Node& node, const std::string& key = std::string()) {
         switch (node.Type()) {
         case YAML::NodeType::Scalar:
-            addOption(key, node.as<std::basic_string<CharT>>(), result);
+            add_option(key, node.as<std::string>());
             break;
         case YAML::NodeType::Sequence:
-            parseSubnodeSequence(node, key, result);
+            parse_subnode_sequence(node, key);
             break;
         case YAML::NodeType::Map:
-            parseSubnodeMap(node, key, result);
+            parse_subnode_map(node, key);
             break;
         default:
             break;
         }
     }
 
-    template <typename CharT>
-    void parseSubnodeSequence(const YAML::Node& node, const std::string& key, boost::program_options::basic_parsed_options<CharT>& result) {
+    void parse_subnode_sequence(const YAML::Node& node, const std::string& key) {
         for (const auto& subnode : node) {
-            parseSubnode(subnode, key, result);
+            parse_subnode(subnode, key);
         }
     }
 
-    template <typename CharT>
-    void parseSubnodeMap(const YAML::Node& node, const std::string& key, boost::program_options::basic_parsed_options<CharT>& result) {
+    void parse_subnode_map(const YAML::Node& node, const std::string& key) {
         for (const auto& pair : node) {
             const std::string& node_key = pair.first.as<std::string>();
             std::string real_key = key.empty() ? node_key : key + '.' + node_key;
             std::replace(real_key.begin(), real_key.end(), '_', '-');
-            parseSubnode(pair.second, real_key, result);
+            parse_subnode(pair.second, real_key);
         }
     }
 
-    template <typename CharT>
-    void addOption(const std::string& key, const std::basic_string<CharT>& value, boost::program_options::basic_parsed_options<CharT>& result) {
-        std::cerr << "XYZ: addOption:" << key << "; " << value << std::endl;
+    void add_option(const std::string& key, const std::string& value) {
         if (key.empty()) {
-            // FIXME: XYZ: Fix this logical error...
-            throw std::logic_error("Empty key - malformed YAML?");
+            throw std::runtime_error("Empty node key");
         }
-        // FIXME: XYZ: work with unallowed options
-        /*
-            auto allowed_iter = allowed_options.find(key);
-            if (!allow_unregistered && allowed_iter == allowed_options.end()) {
-                throw std::logic_error("Unallowed option in YAML node");
-            }
-            */
 
-        auto option_iter = std::find_if(
-                    result.options.begin(), result.options.end(),
-                    [&key](const boost::program_options::basic_option<CharT>& test) {
-            return test.string_key == key;
+        auto option_iter = std::find_if(_po.options.begin(), _po.options.end(), [&key](const auto& item) {
+            return item.string_key == key;
         });
 
-        if (option_iter == result.options.end()) {
-            result.options.emplace_back();
-            option_iter = result.options.end() - 1;
+        if (option_iter == _po.options.end()) {
+            _po.options.emplace_back();
+            option_iter = _po.options.end() - 1;
             option_iter->string_key = key;
-            // FIXME: XYZ: work with unallowed options
-            /*  if (allowed_iter == allowed_options.end()) {
-                    option_iter->unregistered = true;
-                }*/
         }
 
         option_iter->value.push_back(value);
     }
 
-    const boost::program_options::options_description& _desc;
-    std::set<std::string> _allowed_options;
-    bool _allow_unregistered;
+    boost::program_options::parsed_options& _po;
 };
 
 } /* Anonymous Namespace */
@@ -360,8 +334,11 @@ boost::program_options::parsed_options utils::config_file::read_from_yaml(const 
         auto label = node.first.as<sstring>();
 
         if (label == "seastar") {
-            std::cerr << "Reading seastar section..." << std::endl;
-            seastar_po = BpoYaml{_seastar_opts}.parse(node.second);
+            try {
+                BpoYaml{seastar_po}.parse(node.second);
+            } catch (const std::runtime_error& e) {
+                h(label, e.what(), value_status::Invalid);
+            }
             continue;
         }
         auto i = std::find_if(_cfgs.begin(), _cfgs.end(), [&label](const config_src& cfg) { return cfg.name() == label; });
@@ -420,13 +397,9 @@ utils::config_file::configs utils::config_file::unset_values() const {
 }
 
 boost::program_options::parsed_options utils::config_file::read_from_file(const sstring& filename, error_handler h) {
-    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
     std::ifstream stream(filename);
-    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
     std::stringstream ss;
-    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
     ss << stream.rdbuf();
-    std::cerr << "XYZ: Reading config file: " << ss.str() << std::endl;
     return read_from_yaml(ss.str().c_str(), h);
 }
 
