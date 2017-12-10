@@ -160,12 +160,8 @@ public:
      */
     using error_handler = std::function<void(const sstring&, const sstring&, stdx::optional<value_status>)>;
 
-    void read_from_yaml(const sstring&, error_handler = {});
-    void read_from_yaml(const char *, error_handler = {});
-    boost::program_options::parsed_options read_from_yaml_sync(const char* filename, error_handler h);
-    future<> read_from_file(const sstring&, error_handler = {});
-    future<> read_from_file(file, error_handler = {});
-    boost::program_options::parsed_options read_from_file_sync(const sstring& filename, error_handler h);
+    boost::program_options::parsed_options read_from_yaml(const char* yaml, error_handler h);
+    boost::program_options::parsed_options read_from_file(const sstring& filename, error_handler h);
 
     using configs = std::vector<cfg_ref>;
 
@@ -175,7 +171,8 @@ private:
     configs
         _cfgs;
 
-    boost::program_options::options_description _seastar_opts;
+    boost::program_options::options_description
+        _seastar_opts;
 };
 
 }

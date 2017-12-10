@@ -102,7 +102,7 @@ void read_config(bpo::variables_map& opts, const boost::program_options::options
     }
     std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
     cfg.add_seastar_options(seastar_opts);
-    const bpo::parsed_options seastar_cfg = cfg.read_from_file_sync(file, [](auto & opt, auto & msg, auto status) {
+    const bpo::parsed_options seastar_cfg = cfg.read_from_file(file, [](auto & opt, auto & msg, auto status) {
         auto level = log_level::warn;
         if (status.value_or(db::config::value_status::Invalid) != db::config::value_status::Invalid) {
             level = log_level::error;
