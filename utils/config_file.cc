@@ -265,9 +265,62 @@ void utils::config_file::read_from_yaml(const char* yaml, error_handler h) {
     for (auto node : doc) {
         auto label = node.first.as<sstring>();
 
+        auto i = std::find_if(_cfgs.begin(), _cfgs.end(), [&label](const config_src& cfg) { return cfg.name() == label; });
+        if (i == _cfgs.end()) {
+            h(label, "Unknown option", stdx::nullopt);
+            continue;
+        }
+
+        config_src& cfg = *i;
+
+        if (cfg.source() > config_source::SettingsFile) {
+            // already set
+            continue;
+        }
+        switch (cfg.status()) {
+        case value_status::Invalid:
+            h(label, "Option is not applicable", cfg.status());
+            continue;
+        case value_status::Unused:
+        default:
+            break;
+        }
+        if (node.second.IsNull()) {
+            continue;
+        }
+        // Still, a syntax error is an error warning, not a fail
+        try {
+            cfg.set_value(node.second);
+        } catch (std::exception& e) {
+            h(label, e.what(), cfg.status());
+        } catch (...) {
+            h(label, "Could not convert value", cfg.status());
+        }
+    }
+}
+boost::program_options::parsed_options utils::config_file::read_from_yaml_sync(const char* yaml, const boost::program_options::options_description& seastar_opts, error_handler h) {
+    std::unordered_map<sstring, cfg_ref> values;
+
+    if (!h) {
+        h = [](auto & opt, auto & msg, auto) {
+            throw std::invalid_argument(msg + " : " + opt);
+        };
+    }
+    bpo::parsed_options seastar_po{&seastar_opts};
+    /*
+     * Note: this is not very "half-fault" tolerant. I.e. there could be
+     * yaml syntax errors that origin handles and still sets the options
+     * where as we don't...
+     * There are no exhaustive attempts at converting, we rely on syntax of
+     * file mapping to the data type...
+     */
+    auto doc = YAML::Load(yaml);
+    for (auto node : doc) {
+        auto label = node.first.as<sstring>();
+
         if (label == "seastar") {
             std::cerr << "Reading seastar section..." << std::endl;
-            BpoYaml{}.parse(node.second);
+            seastar_po = BpoYaml{seastar_opts}.parse(node.second);
         }
         auto i = std::find_if(_cfgs.begin(), _cfgs.end(), [&label](const config_src& cfg) { return cfg.name() == label; });
         if (i == _cfgs.end()) {
@@ -301,6 +354,7 @@ void utils::config_file::read_from_yaml(const char* yaml, error_handler h) {
             h(label, "Could not convert value", cfg.status());
         }
     }
+    return seastar_po;
 }
 
 utils::config_file::configs utils::config_file::set_values() const {
@@ -339,7 +393,7 @@ future<> utils::config_file::read_from_file(const sstring& filename, error_handl
     });
 }
 
-void utils::config_file::read_from_file_sync(const sstring& filename, error_handler h) {
+boost::program_options::parsed_options utils::config_file::read_from_file_sync(const sstring& filename, const boost::program_options::options_description& seastar_opts, error_handler h) {
     std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
     std::ifstream stream(filename);
     std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
@@ -347,7 +401,7 @@ void utils::config_file::read_from_file_sync(const sstring& filename, error_hand
     std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
     ss << stream.rdbuf();
     std::cerr << "XYZ: Reading config file: " << ss.str() << std::endl;
-    return read_from_yaml(ss.str(), h);
+    return read_from_yaml_sync(ss.str().c_str(), seastar_opts, h);
 }
 
 

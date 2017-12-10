@@ -88,7 +88,7 @@ static boost::filesystem::path relative_conf_dir(boost::filesystem::path path) {
     return conf_dir / path;
 }
 
-void read_config(bpo::variables_map& opts, db::config& cfg) {
+void read_config(bpo::variables_map& opts, const boost::program_options::options_description& seastar_opts, db::config& cfg) {
     using namespace boost::filesystem;
     sstring file;
 
@@ -101,7 +101,7 @@ void read_config(bpo::variables_map& opts, db::config& cfg) {
         file = relative_conf_dir("scylla.yaml").string();
     }
     std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
-    cfg.read_from_file_sync(file, [](auto & opt, auto & msg, auto status) {
+    cfg.read_from_file_sync(file, seastar_opts, [](auto & opt, auto & msg, auto status) {
         auto level = log_level::warn;
         if (status.value_or(db::config::value_status::Invalid) != db::config::value_status::Invalid) {
             level = log_level::error;
@@ -304,7 +304,7 @@ int main(int ac, char** av) {
 
     app.set_configuration_reader([&](bpo::variables_map& configuration) {
         std::cerr << "Reading custom configuration! " << std::endl;
-        read_config(configuration, *cfg);
+        read_config(configuration, app.get_conf_file_options_description(), *cfg);
     });
     return app.run_deprecated(ac, av, [&] {
         if (help_version) {

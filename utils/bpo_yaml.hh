@@ -9,7 +9,6 @@
 #include <boost/program_options/parsers.hpp>
 #include <boost/program_options/options_description.hpp>
 
-// FIXME: XYZ: Throiw exceptions in case of errors
 class BpoYaml {
 public:
     BpoYaml(const boost::program_options::options_description& desc, bool allow_unregistered = false)
@@ -57,6 +56,39 @@ private:
             const std::string& real_key = key.empty() ? node_key : key + '.' + node_key;
             parseSubnode(pair.second, real_key, result);
         }
+    }
+
+    template <typename CharT>
+     void addOption(const std::string& key, const std::basic_string<CharT>& value, boost::program_options::basic_parsed_options<CharT>& result) {
+            if (key.empty()) {
+                throw std::logic_error("Empty key - malformed YAML?");
+            }
+                // FIXME: XYZ: work with unallowed options
+            /*
+            auto allowed_iter = allowed_options.find(key);
+            if (!allow_unregistered && allowed_iter == allowed_options.end()) {
+                throw std::logic_error("Unallowed option in YAML node");
+            }
+            */
+
+            auto option_iter = std::find_if(
+                result.options.begin(), result.options.end(),
+                [&key](const boost::program_options::basic_option<CharT>& test) {
+                    return test.string_key == key;
+                }
+            );
+
+            if (option_iter == result.options.end()) {
+                result.options.emplace_back();
+                option_iter = result.options.end() - 1;
+                option_iter->string_key = key;
+                // FIXME: XYZ: work with unallowed options
+              /*  if (allowed_iter == allowed_options.end()) {
+                    option_iter->unregistered = true;
+                }*/
+            }
+
+            option_iter->value.push_back(value);
     }
 
     const boost::program_options::options_description& _desc;
