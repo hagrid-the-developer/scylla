@@ -162,6 +162,7 @@ public:
     void read_from_yaml(const char *, error_handler = {});
     future<> read_from_file(const sstring&, error_handler = {});
     future<> read_from_file(file, error_handler = {});
+    void read_from_file_sync(const sstring& filename, error_handler h);
 
     using configs = std::vector<cfg_ref>;
 

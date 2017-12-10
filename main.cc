@@ -88,28 +88,32 @@ static boost::filesystem::path relative_conf_dir(boost::filesystem::path path) {
     return conf_dir / path;
 }
 
-static future<>
-read_config(bpo::variables_map& opts, db::config& cfg) {
+void read_config(bpo::variables_map& opts, db::config& cfg) {
     using namespace boost::filesystem;
     sstring file;
 
+    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
     if (opts.count("options-file") > 0) {
+    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
         file = opts["options-file"].as<sstring>();
     } else {
+    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
         file = relative_conf_dir("scylla.yaml").string();
     }
-    return check_direct_io_support(file).then([file, &cfg] {
-        return cfg.read_from_file(file, [](auto & opt, auto & msg, auto status) {
-            auto level = log_level::warn;
-            if (status.value_or(db::config::value_status::Invalid) != db::config::value_status::Invalid) {
-                level = log_level::error;
-            }
-            startlog.log(level, "{} : {}", msg, opt);
-        });
-    }).handle_exception([file](auto ep) {
-        startlog.error("Could not read configuration file {}: {}", file, ep);
-        return make_exception_future<>(ep);
+    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
+    cfg.read_from_file_sync(file, [](auto & opt, auto & msg, auto status) {
+        auto level = log_level::warn;
+        if (status.value_or(db::config::value_status::Invalid) != db::config::value_status::Invalid) {
+            level = log_level::error;
+        }
+        startlog.log(level, "{} : {}", msg, opt);
     });
+    // FIXME: XYZ: Handle exceptions.
+    // FIXME: XYZ: Maybe handle issues with file opening...
+    //    }).handle_exception([file](auto ep) {
+    //        startlog.error("Could not read configuration file {}: {}", file, ep);
+    //        return make_exception_future<>(ep);
+    //    });
 }
 static future<> disk_sanity(sstring path, bool developer_mode) {
     return check_direct_io_support(path).then([] {
@@ -298,6 +302,10 @@ int main(int ac, char** av) {
     prometheus::config pctx;
     directories dirs;
 
+    app.set_configuration_reader([&](bpo::variables_map& configuration) {
+        std::cerr << "Reading custom configuration! " << std::endl;
+        read_config(configuration, *cfg);
+    });
     return app.run_deprecated(ac, av, [&] {
         if (help_version) {
             print("%s\n", scylla_version());
@@ -322,7 +330,7 @@ int main(int ac, char** av) {
         tcp_syncookies_sanity();
 
         return seastar::async([cfg, &db, &qp, &proxy, &mm, &ctx, &opts, &dirs, &pctx, &prometheus_server, &return_value, &cf_cache_hitrate_calculator] {
-            read_config(opts, *cfg).get();
+//            read_config(opts, *cfg).get();
             for (configurable& c : configurables()) {
                 c.initialize(opts).get();
             }

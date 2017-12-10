@@ -36,6 +36,7 @@
 #include <seastar/core/do_with.hh>
 #include <seastar/core/print.hh>
 
+#include "bpo_yaml.hh"
 #include "config_file.hh"
 #include "config_file_impl.hh"
 
@@ -264,6 +265,10 @@ void utils::config_file::read_from_yaml(const char* yaml, error_handler h) {
     for (auto node : doc) {
         auto label = node.first.as<sstring>();
 
+        if (label == "seastar") {
+            std::cerr << "Reading seastar section..." << std::endl;
+            BpoYaml{}.parse(node.second);
+        }
         auto i = std::find_if(_cfgs.begin(), _cfgs.end(), [&label](const config_src& cfg) { return cfg.name() == label; });
         if (i == _cfgs.end()) {
             h(label, "Unknown option", stdx::nullopt);
@@ -332,6 +337,17 @@ future<> utils::config_file::read_from_file(const sstring& filename, error_handl
     return open_file_dma(filename, open_flags::ro).then([this, h](file f) {
        return read_from_file(std::move(f), h);
     });
+}
+
+void utils::config_file::read_from_file_sync(const sstring& filename, error_handler h) {
+    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
+    std::ifstream stream(filename);
+    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
+    std::stringstream ss;
+    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
+    ss << stream.rdbuf();
+    std::cerr << "XYZ: Reading config file: " << ss.str() << std::endl;
+    return read_from_yaml(ss.str(), h);
 }
 
 
