@@ -803,6 +803,14 @@ inter_dc_tcp_nodelay: false
     
 )apa";
 
+const char* seastar_conf = R"apa(
+seastar:
+        idle_poll_timeout: 12345
+        network_stack: xyz
+        poll_aio: false
+        blocked_reactor_notify_ms: 23456
+)apa";
+
 namespace utils {
 template<typename... Args>
 inline std::basic_ostream<Args...> & operator<<(std::basic_ostream<Args...> & os, const utils::config_file::config_source & v) {

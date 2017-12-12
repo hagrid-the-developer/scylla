@@ -97,31 +97,30 @@ void read_config(bpo::variables_map& opts, const boost::program_options::options
     } else {
         file = relative_conf_dir("scylla.yaml").string();
     }
+
     cfg.add_seastar_options(seastar_opts);
-    const bpo::parsed_options seastar_cfg = cfg.read_from_file(file, [](auto & opt, auto & msg, auto status) {
-        auto level = log_level::warn;
-        if (status.value_or(db::config::value_status::Invalid) != db::config::value_status::Invalid) {
-            level = log_level::error;
-        }
-        startlog.log(level, "{} : {}", msg, opt);
-    });
     try {
+        const bpo::parsed_options seastar_cfg = cfg.read_from_file(file, [](auto & opt, auto & msg, auto status) {
+            auto level = log_level::warn;
+            if (status.value_or(db::config::value_status::Invalid) != db::config::value_status::Invalid) {
+                level = log_level::error;
+            }
+            startlog.log(level, "{} : {}", msg, opt);
+        });
         bpo::store(seastar_cfg, opts);
     } catch(bpo::error_with_option_name& e) {
         std::string on = e.get_option_name();
+        // de-hyphenate
         std::replace(on.begin(), on.end(), '-', '_');
         e.set_option_name(on);
-        startlog.error("Could not read seastar section in {}: {}", file, e.what());
-        throw e;
+        startlog.error("Could not read seastar section in {}: {}", file, e);
+        throw;
+    } catch (const std::runtime_error& e) {
+        startlog.error("Could not read configuration file {}: {}", file, e);
+        throw;
     }
-
-    // FIXME: XYZ: Handle exceptions.
-    // FIXME: XYZ: Maybe handle issues with file opening...
-    //    }).handle_exception([file](auto ep) {
-    //        startlog.error("Could not read configuration file {}: {}", file, ep);
-    //        return make_exception_future<>(ep);
-    //    });
 }
+
 static future<> disk_sanity(sstring path, bool developer_mode) {
     return check_direct_io_support(path).then([] {
         return make_ready_future<>();

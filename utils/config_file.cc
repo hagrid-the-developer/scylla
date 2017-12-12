@@ -79,8 +79,7 @@ private:
     void parse_subnode_map(const YAML::Node& node, const std::string& key) {
         for (const auto& pair : node) {
             const std::string& node_key = pair.first.as<std::string>();
-            std::string real_key = key.empty() ? node_key : key + '.' + node_key;
-            std::replace(real_key.begin(), real_key.end(), '_', '-');
+            std::string real_key = utils::hyphenate(key.empty() ? node_key : key + '.' + node_key);
             parse_subnode(pair.second, real_key);
         }
     }
@@ -301,8 +300,7 @@ utils::config_file::add_options(bpo::options_description_easy_init& init) {
     for (config_src& src : _cfgs) {
         if (src.status() == value_status::Used) {
             auto&& name = src.name();
-            sstring tmp(name.begin(), name.end());
-            std::replace(tmp.begin(), tmp.end(), '_', '-');
+            sstring tmp = hyphenate(name);
             src.add_command_line_option(init, tmp, src.desc());
         }
     }
@@ -398,8 +396,14 @@ utils::config_file::configs utils::config_file::unset_values() const {
 
 boost::program_options::parsed_options utils::config_file::read_from_file(const sstring& filename, error_handler h) {
     std::ifstream stream(filename);
+    if (!stream) {
+        throw std::runtime_error(sprint("Could not open configuration file at %s. Make sure it exists.", filename));
+    }
     std::stringstream ss;
     ss << stream.rdbuf();
+    if (stream.bad()) {
+        throw std::runtime_error(sprint("Error occured during read of configuration file at %s.", filename));
+    }
     return read_from_yaml(ss.str().c_str(), h);
 }
 
