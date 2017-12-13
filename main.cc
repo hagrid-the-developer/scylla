@@ -335,7 +335,6 @@ int main(int ac, char** av) {
         tcp_syncookies_sanity();
 
         return seastar::async([cfg, &db, &qp, &proxy, &mm, &ctx, &opts, &dirs, &pctx, &prometheus_server, &return_value, &cf_cache_hitrate_calculator] {
-//            read_config(opts, *cfg).get();
             for (configurable& c : configurables()) {
                 c.initialize(opts).get();
             }
