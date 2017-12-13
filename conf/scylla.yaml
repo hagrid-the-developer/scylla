@@ -799,9 +799,9 @@ commitlog_total_space_in_mb: -1
 # Keep at 12 for new clusters.
 murmur3_partitioner_ignore_msb_bits: 12
 
-# This section can contain configurastion ioptions for seastar.
+# This section can contain configuration options for seastar.
 # You can display possible options with --help, just replace '-' with '_'
-# in the names of options. 
+# in the names of options.
 #seastar:
 #        blocked_reactor_notify_ms: 2000
 #        poll_aio: true
