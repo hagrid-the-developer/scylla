@@ -20,15 +20,20 @@
  */
 
 
+#include <boost/program_options.hpp>
 #include <boost/test/unit_test.hpp>
 #include <stdlib.h>
 #include <iostream>
 
+#include "seastar/core/print.hh"
 #include "tests/test-utils.hh"
 #include "core/future-util.hh"
 #include "db/config.hh"
 
 using namespace db;
+namespace bpo = boost::program_options;
+
+namespace {
 
 // stock, default cassandra.yaml
 const char* cassandra_conf = R"apa(
@@ -803,6 +808,28 @@ inter_dc_tcp_nodelay: false
     
 )apa";
 
+const char* seastar_conf = R"apa(
+seastar:
+        network_stack: xyz
+        idle_poll_time_us: 12345
+        poll_aio: false
+        blocked_reactor_notify_ms: 23456
+)apa";
+
+/* Some arguments for parsing of seastar section. Let's create fake arguments to test the parser. */
+boost::program_options::options_description get_options_description() {
+    boost::program_options::options_description opts;
+    opts.add_options()
+        ("network-stack", bpo::value<std::string>())
+        ("idle-poll-time-us", bpo::value<unsigned>()->default_value(0))
+        ("poll-aio", bpo::value<bool>()->default_value(true))
+        ("blocked-reactor-notify-ms", bpo::value<unsigned>()->default_value(0))
+        ;
+    return opts;
+}
+
+} /* Anonymous Namespace */
+
 namespace utils {
 template<typename... Args>
 inline std::basic_ostream<Args...> & operator<<(std::basic_ostream<Args...> & os, const utils::config_file::config_source & v) {
@@ -888,6 +915,76 @@ SEASTAR_TEST_CASE(test_parse_broken) {
     });
 
     BOOST_REQUIRE(ok);
+
+    return make_ready_future<>();
+}
+
+SEASTAR_TEST_CASE(test_parse_seastar_section) {
+    config cfg;
+    cfg.add_seastar_options(get_options_description());
+
+    sstring conf = sprint("%s\n%s", cassandra_conf, seastar_conf);
+    const bpo::parsed_options parsed_options = cfg.read_from_yaml(conf.c_str(), [](auto& opt, auto& msg, auto status) {
+        if (status != config::value_status::Invalid) {
+            throw std::invalid_argument(msg + " : " + opt);
+        }
+    });
+
+    bpo::variables_map vm;
+    bpo::store(parsed_options, vm);
+
+    BOOST_CHECK_EQUAL(vm["network-stack"].as<std::string>(), "xyz");
+    BOOST_CHECK_EQUAL(vm["idle-poll-time-us"].as<unsigned>(), 12345);
+    BOOST_CHECK_EQUAL(vm["poll-aio"].as<bool>(), false);
+    BOOST_CHECK_EQUAL(vm["blocked-reactor-notify-ms"].as<unsigned>(), 23456);
+
+    return make_ready_future<>();
+}
+
+SEASTAR_TEST_CASE(test_parse_seastar_section_empty) {
+    config cfg;
+    cfg.add_seastar_options(get_options_description());
+
+    sstring conf = sprint("%s\n%s\n%s", cassandra_conf, seastar_conf, R"apa(
+seastar: xyz
+)apa");
+    bool ok = false;
+    const bpo::parsed_options parsed_options = cfg.read_from_yaml(conf.c_str(), [&](auto& opt, auto& msg, auto status) {
+        if (opt == "seastar" && status == config::value_status::Invalid) {
+            ok = true;
+        }
+    });
+
+    BOOST_REQUIRE(ok);
+
+    return make_ready_future<>();
+}
+
+SEASTAR_TEST_CASE(test_parse_seastar_section_multiple_times) {
+    config cfg;
+    cfg.add_seastar_options(get_options_description());
+
+    sstring conf = sprint("%s\n%s", cassandra_conf, R"apa(
+seastar:
+        network_stack: xyz
+        idle_poll_time_us: 12345
+seastar:
+        poll_aio: false
+        blocked_reactor_notify_ms: 23456
+)apa");
+    const bpo::parsed_options parsed_options = cfg.read_from_yaml(conf.c_str(), [](auto& opt, auto& msg, auto status) {
+        if (status != config::value_status::Invalid) {
+            throw std::invalid_argument(msg + " : " + opt);
+        }
+    });
+
+    bpo::variables_map vm;
+    bpo::store(parsed_options, vm);
+
+    BOOST_CHECK_EQUAL(vm["network-stack"].as<std::string>(), "xyz");
+    BOOST_CHECK_EQUAL(vm["idle-poll-time-us"].as<unsigned>(), 12345);
+    BOOST_CHECK_EQUAL(vm["poll-aio"].as<bool>(), false);
+    BOOST_CHECK_EQUAL(vm["blocked-reactor-notify-ms"].as<unsigned>(), 23456);
 
     return make_ready_future<>();
 }
