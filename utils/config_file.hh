@@ -144,7 +144,8 @@ public:
     add_options(boost::program_options::options_description_easy_init&);
 
     /**
-     * Takes options in the argument and adds them to seastar options stored inside the object.
+     * Takes options description in the argument and adds them to seastar options description
+     * stored inside the object.
      */
     void add_seastar_options(const boost::program_options::options_description& _seastar_opts);
 
