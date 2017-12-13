@@ -33,6 +33,8 @@
 using namespace db;
 namespace bpo = boost::program_options;
 
+namespace {
+
 // stock, default cassandra.yaml
 const char* cassandra_conf = R"apa(
 # Cassandra storage config YAML 
@@ -814,16 +816,6 @@ seastar:
         blocked_reactor_notify_ms: 23456
 )apa";
 
-namespace utils {
-template<typename... Args>
-inline std::basic_ostream<Args...> & operator<<(std::basic_ostream<Args...> & os, const utils::config_file::config_source & v) {
-    typedef std::underlying_type<utils::config_file::config_source>::type type;
-    return os << type(v);
-}
-}
-
-namespace {
-
 /* Some arguments for parsing of seastar section. Let's create fake arguments to test the parser. */
 boost::program_options::options_description get_options_description() {
     boost::program_options::options_description opts;
@@ -837,6 +829,14 @@ boost::program_options::options_description get_options_description() {
 }
 
 } /* Anonymous Namespace */
+
+namespace utils {
+template<typename... Args>
+inline std::basic_ostream<Args...> & operator<<(std::basic_ostream<Args...> & os, const utils::config_file::config_source & v) {
+    typedef std::underlying_type<utils::config_file::config_source>::type type;
+    return os << type(v);
+}
+}
 
 namespace db {
 template<typename... T, typename... Args>
