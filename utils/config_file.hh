@@ -144,6 +144,12 @@ public:
     add_options(boost::program_options::options_description_easy_init&);
 
     /**
+     * Takes options description in the argument and adds them to seastar options description
+     * stored inside the object.
+     */
+    void add_seastar_options(const boost::program_options::options_description& _seastar_opts);
+
+    /**
      * Default behaviour for yaml parser is to throw on
      * unknown stuff, invalid opts or conversion errors.
      *
@@ -158,10 +164,8 @@ public:
      */
     using error_handler = std::function<void(const sstring&, const sstring&, stdx::optional<value_status>)>;
 
-    void read_from_yaml(const sstring&, error_handler = {});
-    void read_from_yaml(const char *, error_handler = {});
-    future<> read_from_file(const sstring&, error_handler = {});
-    future<> read_from_file(file, error_handler = {});
+    boost::program_options::parsed_options read_from_yaml(const char* yaml, error_handler h);
+    boost::program_options::parsed_options read_from_file(const sstring& filename, error_handler h);
 
     using configs = std::vector<cfg_ref>;
 
@@ -170,6 +174,9 @@ public:
 private:
     configs
         _cfgs;
+
+    boost::program_options::options_description
+        _seastar_opts;
 };
 
 }

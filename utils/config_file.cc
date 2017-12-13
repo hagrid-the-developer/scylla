@@ -41,6 +41,73 @@
 
 namespace bpo = boost::program_options;
 
+namespace {
+
+class BpoYaml {
+public:
+    BpoYaml(boost::program_options::parsed_options& po)
+        : _po(po) {
+    }
+
+    void parse(const YAML::Node& node) {
+            parse_subnode(node);
+    }
+
+private:
+    void parse_subnode(const YAML::Node& node, const std::string& key = std::string()) {
+        switch (node.Type()) {
+        case YAML::NodeType::Scalar:
+            add_option(key, node.as<std::string>());
+            break;
+        case YAML::NodeType::Sequence:
+            parse_subnode_sequence(node, key);
+            break;
+        case YAML::NodeType::Map:
+            parse_subnode_map(node, key);
+            break;
+        default:
+            break;
+        }
+    }
+
+    void parse_subnode_sequence(const YAML::Node& node, const std::string& key) {
+        for (const auto& subnode : node) {
+            parse_subnode(subnode, key);
+        }
+    }
+
+    void parse_subnode_map(const YAML::Node& node, const std::string& key) {
+        for (const auto& pair : node) {
+            const std::string& node_key = pair.first.as<std::string>();
+            std::string real_key = utils::hyphenate(key.empty() ? node_key : key + '.' + node_key);
+            parse_subnode(pair.second, real_key);
+        }
+    }
+
+    void add_option(const std::string& key, const std::string& value) {
+        if (key.empty()) {
+            throw std::runtime_error("Empty node key");
+        }
+
+        auto option_iter = std::find_if(_po.options.begin(), _po.options.end(), [&key](const auto& item) {
+            return item.string_key == key;
+        });
+
+        if (option_iter == _po.options.end()) {
+            _po.options.emplace_back();
+            option_iter = _po.options.end() - 1;
+            option_iter->string_key = key;
+        }
+
+        option_iter->value.push_back(value);
+    }
+
+    boost::program_options::parsed_options& _po;
+};
+
+} /* Anonymous Namespace */
+
+
 template<>
 std::istream& std::operator>>(std::istream& is, std::unordered_map<seastar::sstring, seastar::sstring>& map) {
    std::istreambuf_iterator<char> i(is), e;
@@ -233,19 +300,18 @@ utils::config_file::add_options(bpo::options_description_easy_init& init) {
     for (config_src& src : _cfgs) {
         if (src.status() == value_status::Used) {
             auto&& name = src.name();
-            sstring tmp(name.begin(), name.end());
-            std::replace(tmp.begin(), tmp.end(), '_', '-');
+            sstring tmp = hyphenate(name);
             src.add_command_line_option(init, tmp, src.desc());
         }
     }
     return init;
 }
 
-void utils::config_file::read_from_yaml(const sstring& yaml, error_handler h) {
-    read_from_yaml(yaml.c_str(), std::move(h));
+void utils::config_file::add_seastar_options(const boost::program_options::options_description& seastar_opts) {
+    _seastar_opts.add(seastar_opts);
 }
 
-void utils::config_file::read_from_yaml(const char* yaml, error_handler h) {
+boost::program_options::parsed_options utils::config_file::read_from_yaml(const char* yaml, error_handler h) {
     std::unordered_map<sstring, cfg_ref> values;
 
     if (!h) {
@@ -253,6 +319,7 @@ void utils::config_file::read_from_yaml(const char* yaml, error_handler h) {
             throw std::invalid_argument(msg + " : " + opt);
         };
     }
+    bpo::parsed_options seastar_po{&_seastar_opts};
     /*
      * Note: this is not very "half-fault" tolerant. I.e. there could be
      * yaml syntax errors that origin handles and still sets the options
@@ -264,6 +331,14 @@ void utils::config_file::read_from_yaml(const char* yaml, error_handler h) {
     for (auto node : doc) {
         auto label = node.first.as<sstring>();
 
+        if (label == "seastar") {
+            try {
+                BpoYaml{seastar_po}.parse(node.second);
+            } catch (const std::runtime_error& e) {
+                h(label, e.what(), value_status::Invalid);
+            }
+            continue;
+        }
         auto i = std::find_if(_cfgs.begin(), _cfgs.end(), [&label](const config_src& cfg) { return cfg.name() == label; });
         if (i == _cfgs.end()) {
             h(label, "Unknown option", stdx::nullopt);
@@ -296,6 +371,7 @@ void utils::config_file::read_from_yaml(const char* yaml, error_handler h) {
             h(label, "Could not convert value", cfg.status());
         }
     }
+    return seastar_po;
 }
 
 utils::config_file::configs utils::config_file::set_values() const {
@@ -318,20 +394,17 @@ utils::config_file::configs utils::config_file::unset_values() const {
     return res;
 }
 
-future<> utils::config_file::read_from_file(file f, error_handler h) {
-    return f.size().then([this, f, h](size_t s) {
-        return do_with(make_file_input_stream(f), [this, s, h](input_stream<char>& in) {
-            return in.read_exactly(s).then([this, h](temporary_buffer<char> buf) {
-               read_from_yaml(sstring(buf.begin(), buf.end()), h);
-            });
-        });
-    });
-}
-
-future<> utils::config_file::read_from_file(const sstring& filename, error_handler h) {
-    return open_file_dma(filename, open_flags::ro).then([this, h](file f) {
-       return read_from_file(std::move(f), h);
-    });
+boost::program_options::parsed_options utils::config_file::read_from_file(const sstring& filename, error_handler h) {
+    std::ifstream stream(filename);
+    if (!stream) {
+        throw std::runtime_error(sprint("Could not open configuration file at %s. Make sure it exists.", filename));
+    }
+    std::stringstream ss;
+    ss << stream.rdbuf();
+    if (stream.bad()) {
+        throw std::runtime_error(sprint("Error occured during read of configuration file at %s.", filename));
+    }
+    return read_from_yaml(ss.str().c_str(), h);
 }
 
 
