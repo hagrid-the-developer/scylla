@@ -309,7 +309,6 @@ int main(int ac, char** av) {
     directories dirs;
 
     app.set_configuration_reader([&](bpo::variables_map& configuration) {
-        std::cerr << "Reading custom configuration! " << std::endl;
         read_config(configuration, app.get_conf_file_options_description(), *cfg);
     });
     return app.run_deprecated(ac, av, [&] {
