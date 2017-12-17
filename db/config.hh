@@ -729,6 +729,20 @@ public:
 
     _make_config_values(_make_value_member)
 
+    struct bpo_subsection : public named_value<std::unordered_map<std::string, std::vector<std::string>>, value_status::Used> {
+        bpo_subsection(const stdx::string_view& name);
+
+        // do not add to boost::options. We only care about yaml config
+        void add_command_line_option(boost::program_options::options_description_easy_init&,
+                        const stdx::string_view&, const stdx::string_view&) override {}
+
+        void set_value(const YAML::Node&) override;
+
+        boost::program_options::parsed_options parsed_options(const boost::program_options::options_description&) const;
+    };
+
+    bpo_subsection seastar_subsection;
+
     seastar::logging_settings logging_settings(const boost::program_options::variables_map&) const;
 
     boost::program_options::options_description_easy_init&
