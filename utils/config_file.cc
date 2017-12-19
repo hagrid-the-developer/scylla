@@ -233,9 +233,8 @@ utils::config_file::add_options(bpo::options_description_easy_init& init) {
     for (config_src& src : _cfgs) {
         if (src.status() == value_status::Used) {
             auto&& name = src.name();
-            sstring tmp(name.begin(), name.end());
-            std::replace(tmp.begin(), tmp.end(), '_', '-');
-            src.add_command_line_option(init, tmp, src.desc());
+            // add_command_line() replaces '_' with '-' in name .
+            src.add_command_line_option(init, name, src.desc());
         }
     }
     return init;
@@ -334,5 +333,15 @@ future<> utils::config_file::read_from_file(const sstring& filename, error_handl
     });
 }
 
-
-
+void utils::config_file::read_from_file_sync(const sstring& filename, error_handler h) {
+    std::ifstream stream(filename);
+    if (!stream) {
+        throw std::runtime_error(sprint("Could not open configuration file at %s. Make sure it exists.", filename));
+    }
+    std::stringstream ss;
+    ss << stream.rdbuf();
+    if (stream.bad()) {
+        throw std::runtime_error(sprint("Error occured during read of configuration file at %s.", filename));
+    }
+    read_from_yaml(ss.str().c_str(), h);
+}
