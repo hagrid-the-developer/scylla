@@ -32,6 +32,7 @@
 #include <seastar/util/log.hh>
 
 #include "seastarx.hh"
+#include "utils/options_subsection.hh"
 #include "utils/config_file.hh"
 
 namespace seastar { class file; struct logging_settings; }
@@ -728,6 +729,8 @@ public:
     named_value<type, value_status::status> name;
 
     _make_config_values(_make_value_member)
+
+    utils::options_subsection seastar_subsection;
 
     seastar::logging_settings logging_settings(const boost::program_options::variables_map&) const;
 
