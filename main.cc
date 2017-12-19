@@ -89,8 +89,7 @@ static boost::filesystem::path relative_conf_dir(boost::filesystem::path path) {
     return conf_dir / path;
 }
 
-static future<>
-read_config(bpo::variables_map& opts, db::config& cfg) {
+void read_config(bpo::variables_map& opts, const boost::program_options::options_description& seastar_opts, db::config& cfg) {
     using namespace boost::filesystem;
     sstring file;
 
@@ -99,19 +98,29 @@ read_config(bpo::variables_map& opts, db::config& cfg) {
     } else {
         file = relative_conf_dir("scylla.yaml").string();
     }
-    return check_direct_io_support(file).then([file, &cfg] {
-        return cfg.read_from_file(file, [](auto & opt, auto & msg, auto status) {
+
+    try {
+        cfg.read_from_file_sync(file, [](auto & opt, auto & msg, auto status) {
             auto level = log_level::warn;
             if (status.value_or(db::config::value_status::Invalid) != db::config::value_status::Invalid) {
                 level = log_level::error;
             }
             startlog.log(level, "{} : {}", msg, opt);
         });
-    }).handle_exception([file](auto ep) {
-        startlog.error("Could not read configuration file {}: {}", file, ep);
-        return make_exception_future<>(ep);
-    });
+        bpo::store(cfg.seastar_subsection.parsed_options(seastar_opts), opts);
+    } catch(bpo::error_with_option_name& e) {
+        std::string on = e.get_option_name();
+        // de-hyphenate
+        std::replace(on.begin(), on.end(), '-', '_');
+        e.set_option_name(on);
+        startlog.error("Could not read seastar section in {}: {}", file, e.what());
+        throw;
+    } catch (const std::runtime_error& e) {
+        startlog.error("Could not read configuration file {}: {}", file, e.what());
+        throw;
+    }
 }
+
 static future<> disk_sanity(sstring path, bool developer_mode) {
     return check_direct_io_support(path).then([] {
         return make_ready_future<>();
@@ -324,6 +333,9 @@ int main(int ac, char** av) {
     prometheus::config pctx;
     directories dirs;
 
+    app.set_configuration_reader([&](bpo::variables_map& configuration) {
+        read_config(configuration, app.get_conf_file_options_description(), *cfg);
+    });
     return app.run_deprecated(ac, av, [&] {
         if (help_version) {
             print("%s\n", scylla_version());
@@ -348,7 +360,6 @@ int main(int ac, char** av) {
         tcp_syncookies_sanity();
 
         return seastar::async([cfg, &db, &qp, &proxy, &mm, &ctx, &opts, &dirs, &pctx, &prometheus_server, &return_value, &cf_cache_hitrate_calculator] {
-            read_config(opts, *cfg).get();
             for (configurable& c : configurables()) {
                 c.initialize(opts).get();
             }
