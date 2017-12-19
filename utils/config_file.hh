@@ -23,6 +23,7 @@
 #pragma once
 
 #include <unordered_map>
+#include <vector>
 #include <iosfwd>
 #include <experimental/string_view>
 
@@ -104,6 +105,12 @@ public:
         config_source source() const override {
             return _source;
         }
+        MyType & source(config_source src) {
+            if (src > config_source::None) {
+                _source = src;
+            }
+            return *this;
+        }
         bool is_set() const {
             return _source > config_source::None;
         }
@@ -113,10 +120,7 @@ public:
         }
         MyType & operator()(T&& t, config_source src = config_source::None) {
             _value = std::move(t);
-            if (src > config_source::None) {
-                _source = src;
-            }
-            return *this;
+            return source(src);
         }
         const T& operator()() const {
             return _value;
@@ -162,6 +166,10 @@ public:
     void read_from_yaml(const char *, error_handler = {});
     future<> read_from_file(const sstring&, error_handler = {});
     future<> read_from_file(file, error_handler = {});
+    /**
+     * Read from file with synchronous I/O, for use before seastar is started.
+     */
+    void read_from_file_sync(const sstring& filename, error_handler h);
 
     using configs = std::vector<cfg_ref>;
 
