@@ -924,27 +924,22 @@ SEASTAR_TEST_CASE(test_parse_seastar_section) {
 
     const sstring conf = sprint("%s\n%s", cassandra_conf, seastar_conf);
 
-    std::cerr << "XYZ: conf: " << conf << ";" << std::endl;
     cfg.read_from_yaml(conf.c_str(), [](auto& opt, auto& msg, auto status) {
         if (status != config::value_status::Invalid) {
             throw std::invalid_argument(msg + " : " + opt);
         }
     });
-    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
     const auto opts = get_options_description();
     const bpo::parsed_options parsed_options = cfg.seastar_subsection.parsed_options(opts);
-    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
 
     bpo::variables_map vm;
     bpo::store(parsed_options, vm);
 
-    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
     BOOST_CHECK_EQUAL(vm["network-stack"].as<std::string>(), "xyz");
     BOOST_CHECK_EQUAL(vm["idle-poll-time-us"].as<unsigned>(), 12345);
     BOOST_CHECK_EQUAL(vm["poll-aio"].as<bool>(), false);
     BOOST_CHECK_EQUAL(vm["blocked-reactor-notify-ms"].as<unsigned>(), 23456);
 
-    std::cerr << "XYZ:" << __FILE__ << ":" << __LINE__ << std::endl;
     return make_ready_future<>();
 }
 
@@ -956,7 +951,6 @@ seastar: xyz
 )apa");
     bool ok = false;
     cfg.read_from_yaml(conf.c_str(), [&](auto& opt, auto& msg, auto status) {
-        std::cerr << "XYZ: opt:" << opt << "; status:" << int(status.value()) << std::endl;
         if (opt == "seastar" && status != config::value_status::Invalid) {
             ok = true;
         }

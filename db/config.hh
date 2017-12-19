@@ -738,6 +738,10 @@ public:
 
         void set_value(const YAML::Node&) override;
 
+        /**
+         * Converts internally stored map to bpo::parsed_options. It is caller responsibility that
+         * bpo::options_description from the argument isn't destroyed before returned parsed_options.
+         */
         boost::program_options::parsed_options parsed_options(const boost::program_options::options_description&) const;
     };
 

@@ -99,7 +99,6 @@ void read_config(bpo::variables_map& opts, const boost::program_options::options
     }
 
     try {
-        std::cerr << "XYZ: Going to readf from file: " << file << std::endl;
         cfg.read_from_file_sync(file, [](auto & opt, auto & msg, auto status) {
             auto level = log_level::warn;
             if (status.value_or(db::config::value_status::Invalid) != db::config::value_status::Invalid) {
