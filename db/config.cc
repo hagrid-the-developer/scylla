@@ -85,8 +85,10 @@ struct convert<db::config::seed_provider_type> {
 
 db::config::config()
     : utils::config_file({ _make_config_values(_mk_name)
+        seastar_subsection,
         default_log_level, logger_log_level, log_to_stdout, log_to_syslog })
     _make_config_values(_mk_init)
+    , seastar_subsection("seastar")
     , default_log_level("default_log_level")
     , logger_log_level("logger_log_level")
     , log_to_stdout("log_to_stdout")
