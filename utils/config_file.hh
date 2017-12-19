@@ -88,7 +88,6 @@ public:
     struct named_value : public config_src {
     private:
         friend class config;
-        stdx::string_view _name, _desc;
         T _value = T();
         config_source _source = config_source::None;
     public:
