@@ -89,7 +89,7 @@ static boost::filesystem::path relative_conf_dir(boost::filesystem::path path) {
     return conf_dir / path;
 }
 
-void read_config(bpo::variables_map& opts, const boost::program_options::options_description& seastar_opts, db::config& cfg) {
+static void read_config(bpo::variables_map& opts, const boost::program_options::options_description& seastar_opts, db::config& cfg) {
     using namespace boost::filesystem;
     sstring file;
 
@@ -119,6 +119,31 @@ void read_config(bpo::variables_map& opts, const boost::program_options::options
         startlog.error("Could not read configuration file {}: {}", file, e.what());
         throw;
     }
+}
+
+static future<> read_config_async(bpo::variables_map& opts, const boost::program_options::options_description& seastar_opts, db::config& cfg) {
+    using namespace boost::filesystem;
+    sstring file;
+
+    if (opts.count("options-file") > 0) {
+        file = opts["options-file"].as<sstring>();
+    } else {
+        file = relative_conf_dir("scylla.yaml").string();
+    }
+    return check_direct_io_support(file).then([file, &cfg, &seastar_opts, &opts] {
+        return cfg.read_from_file(file, [&cfg](auto & opt, auto & msg, auto status) {
+            auto level = log_level::warn;
+            if (status.value_or(db::config::value_status::Invalid) != db::config::value_status::Invalid) {
+                level = log_level::error;
+            }
+            startlog.log(level, "{} : {}", msg, opt);
+        }).then([&cfg, &seastar_opts, &opts] {
+            bpo::store(cfg.seastar_subsection.parsed_options(seastar_opts), opts);
+        });
+    }).handle_exception([file](auto ep) {
+        startlog.error("Could not read configuration file {}: {}", file, ep);
+        return make_exception_future<>(ep);
+    });
 }
 
 static future<> disk_sanity(sstring path, bool developer_mode) {
@@ -359,12 +384,32 @@ int main(int ac, char** av) {
 
         tcp_syncookies_sanity();
 
-        return seastar::async([cfg, &db, &qp, &proxy, &mm, &ctx, &opts, &dirs, &pctx, &prometheus_server, &return_value, &cf_cache_hitrate_calculator] {
+        return seastar::async([cfg, &app, &db, &qp, &proxy, &mm, &ctx, &opts, &dirs, &pctx, &prometheus_server, &return_value, &cf_cache_hitrate_calculator] {
             for (configurable& c : configurables()) {
                 c.initialize(opts).get();
             }
 
             logging::apply_settings(cfg->logging_settings(opts));
+
+            smp::handle_signal(SIGHUP, [&app] {
+                return do_with(make_lw_shared<db::config>(), bpo::variables_map{}, [&app] (auto& cfg, auto& configuration) {
+                    //std::cerr << "Received signal!" << std::endl;
+                    startlog.info("Restarting configuration...");
+
+                    return read_config_async(configuration, app.get_conf_file_options_description(), *cfg).then([&app, &cfg, &configuration] {
+                        const auto reloadable = app.get_reloadable();
+                        bpo::variables_map& previous_configuration = app.configuration();
+                        for (auto& kv: previous_configuration) {
+                            const auto key = kv.first;
+                            auto& val = kv.second;
+                            if (reloadable.count(key) && configuration.count(key)) {
+                                val = configuration[key];
+                            }
+                        }
+                        smp::configure(configuration, true);
+                    });
+                });
+            });
 
             verify_rlimit(cfg->developer_mode());
             verify_adequate_memory_per_shard(cfg->developer_mode());
