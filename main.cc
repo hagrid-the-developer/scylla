@@ -393,10 +393,10 @@ int main(int ac, char** av) {
 
             smp::handle_signal(SIGHUP, [&app] {
                 return do_with(make_lw_shared<db::config>(), bpo::variables_map{}, [&app] (auto& cfg, auto& configuration) {
-                    //std::cerr << "Received signal!" << std::endl;
                     startlog.info("Restarting configuration...");
 
                     return read_config_async(configuration, app.get_conf_file_options_description(), *cfg).then([&app, &cfg, &configuration] {
+                        /*
                         const auto reloadable = app.get_reloadable();
                         bpo::variables_map& previous_configuration = app.configuration();
                         for (auto& kv: previous_configuration) {
@@ -407,6 +407,8 @@ int main(int ac, char** av) {
                             }
                         }
                         smp::configure(configuration, true);
+                        */
+                        return app.reload_configuration(configuration);
                     });
                 });
             });
