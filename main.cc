@@ -61,6 +61,7 @@
 #include "sstables/sstables.hh"
 
 seastar::metrics::metric_groups app_metrics;
+bool is_signal_pending = false; // Flag that prevents us to handle signal while another signal is being processed
 
 using namespace std::chrono_literals;
 
@@ -392,6 +393,11 @@ int main(int ac, char** av) {
             logging::apply_settings(cfg->logging_settings(opts));
 
             smp::handle_signal(SIGHUP, [&app] {
+                if (is_signal_pending) {
+                    return make_ready_future<>();
+                }
+                is_signal_pending = true;
+
                 return do_with(make_lw_shared<db::config>(), bpo::variables_map{}, [&app] (auto& cfg, auto& configuration) {
                     startlog.info("Restarting configuration...");
 
@@ -410,6 +416,11 @@ int main(int ac, char** av) {
                         */
                         return app.reload_configuration(configuration);
                     });
+                }).finally([] {
+                    is_signal_pending = false;
+                }).handle_exception([] (std::exception_ptr) {
+                    startlog.error("Attempt to reload configuration failed");
+                    return make_ready_future<>();
                 });
             });
 
