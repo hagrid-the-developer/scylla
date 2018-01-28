@@ -1011,7 +1011,7 @@ static schema_ptr large_partition_schema() {
 
 static future<shared_sstable> load_large_partition_sst() {
     auto sst = make_sstable(large_partition_schema(), "tests/sstables/large_partition", 3,
-            sstables::sstable::version_types::ka, big);
+            sstables::sstable::version_types::la, big);
     auto fut = sst->load();
     return std::move(fut).then([sst = std::move(sst)] {
         return std::move(sst);
@@ -1244,11 +1244,14 @@ SEASTAR_TEST_CASE(promoted_index_write) {
         mtp->apply(std::move(m));
         auto sst = make_sstable(s,
                 "tests/sstables/tests-temporary", 100,
-                sstables::sstable::version_types::ka, big);
+                sstables::sstable::version_types::la, big);
         return write_memtable_to_sstable(*mtp, sst).then([s] {
             return compare_files(
-                    "tests/sstables/large_partition/try1-data-ka-3-Index.db",
-                    "tests/sstables/tests-temporary/try1-data-ka-100-Index.db");
+                    "tests/sstables/large_partition/la-3-Index.db",
+                    "tests/sstables/tests-temporary/la-100-Index.db");
+            //return compare_files(
+            //        "tests/sstables/large_partition/try1-data-ka-3-Index.db",
+            //        "tests/sstables/tests-temporary/try1-data-ka-100-Index.db");
         }).then([sst, mtp] {});
     });
 }
