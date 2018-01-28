@@ -875,7 +875,7 @@ column_family::seal_active_streaming_memtable_immediate(flush_permit&& permit) {
         with_lock(_sstables_lock.for_read(), [this, old, permit = std::move(permit)] () mutable {
             auto newtab = sstables::make_sstable(_schema,
                 _config.datadir, calculate_generation_for_new_table(),
-                sstables::sstable::version_types::ka,
+                sstables::sstable::version_types::la,
                 sstables::sstable::format_types::big);
 
             newtab->set_unshared();
@@ -941,7 +941,7 @@ future<> column_family::seal_active_streaming_memtable_big(streaming_memtable_bi
             return with_lock(_sstables_lock.for_read(), [this, old, &smb, permit = std::move(permit)] () mutable {
                 auto newtab = sstables::make_sstable(_schema,
                                                                 _config.datadir, calculate_generation_for_new_table(),
-                                                                sstables::sstable::version_types::ka,
+                                                                sstables::sstable::version_types::la,
                                                                 sstables::sstable::format_types::big);
 
                 newtab->set_unshared();
@@ -1024,7 +1024,7 @@ column_family::try_flush_memtable_to_sstable(lw_shared_ptr<memtable> old, sstabl
 
     auto newtab = sstables::make_sstable(_schema,
         _config.datadir, gen,
-        sstables::sstable::version_types::ka,
+        sstables::sstable::version_types::la,
         sstables::sstable::format_types::big);
 
     newtab->set_unshared();
@@ -1380,7 +1380,7 @@ column_family::compact_sstables(sstables::compaction_descriptor descriptor, bool
         auto create_sstable = [this] {
                 auto gen = this->calculate_generation_for_new_table();
                 auto sst = sstables::make_sstable(_schema, _config.datadir, gen,
-                        sstables::sstable::version_types::ka,
+                        sstables::sstable::version_types::la,
                         sstables::sstable::format_types::big);
                 sst->set_unshared();
                 return sst;
@@ -1783,7 +1783,7 @@ void distributed_loader::reshard(distributed<database>& db, sstring ks_name, sst
                     }).get0();
 
                     auto sst = sstables::make_sstable(cf->schema(), cf->dir(), gen,
-                        sstables::sstable::version_types::ka, sstables::sstable::format_types::big,
+                        sstables::sstable::version_types::la, sstables::sstable::format_types::big,
                         gc_clock::now(), default_io_error_handler_gen());
                     return sst;
                 };
