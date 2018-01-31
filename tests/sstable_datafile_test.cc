@@ -75,7 +75,7 @@ atomic_cell make_atomic_cell(bytes_view value, uint32_t ttl = 0, uint32_t expira
         return atomic_cell::make_live(0, value);
     }
 }
-#if 0
+//#if 0
 SEASTAR_TEST_CASE(datafile_generation_01) {
     // Data file with clustering key
     //
@@ -889,7 +889,7 @@ SEASTAR_TEST_CASE(datafile_generation_12) {
         }).then([sst, mt] {});
     });
 }
-#endif
+//#endif
 static future<> sstable_compression_test(compressor c, unsigned generation) {
     return test_setup::do_with_test_directory([c, generation] {
         // NOTE: set a given compressor algorithm to schema.
@@ -925,7 +925,7 @@ static future<> sstable_compression_test(compressor c, unsigned generation) {
         }).then([sst, mtp] {});
     });
 }
-#if 0
+//#if 0
 SEASTAR_TEST_CASE(datafile_generation_13) {
     return sstable_compression_test(compressor::lz4, 13);
 }
@@ -963,7 +963,7 @@ SEASTAR_TEST_CASE(datafile_generation_16) {
         }).then([sst, mtp] {});
     });
 }
-#endif
+//#endif
 ////////////////////////////////  Test basic compaction support
 
 // open_sstable() opens the requested sstable for reading only (sstables are
@@ -1004,7 +1004,7 @@ static flat_mutation_reader sstable_reader(shared_sstable sst, schema_ptr s) {
 static flat_mutation_reader sstable_reader(shared_sstable sst, schema_ptr s, const dht::partition_range& pr) {
     return sst->as_mutation_source().make_reader(s, pr, s->full_slice());
 }
-#if 0
+//#if 0
 SEASTAR_TEST_CASE(compaction_manager_test) {
   return seastar::async([] {
     storage_service_for_tests ssft;
@@ -1177,7 +1177,7 @@ SEASTAR_TEST_CASE(compact) {
 
     // verify that the compacted sstable look like
 }
-#endif
+//#endif
 
 static std::vector<sstables::shared_sstable> get_candidates_for_leveled_strategy(column_family& cf) {
     std::vector<sstables::shared_sstable> candidates;
@@ -1327,7 +1327,7 @@ static future<> check_compacted_sstables(unsigned long generation, std::vector<u
         });
     });
 }
-#if 0
+//#if 0
 SEASTAR_TEST_CASE(compact_02) {
     // NOTE: generations 18 to 38 are used here.
 
@@ -1676,7 +1676,7 @@ SEASTAR_TEST_CASE(test_counter_write) {
         });
     });
 }
-#endif
+//#endif
 // Leveled compaction strategy tests
 
 static dht::token create_token_from_key(sstring key) {
@@ -1776,7 +1776,7 @@ static bool sstable_overlaps(const lw_shared_ptr<column_family>& cf, int64_t gen
     auto range2 = range<dht::token>::make(candidate2->get_first_decorated_key()._token, candidate2->get_last_decorated_key()._token);
     return range1.overlaps(range2, dht::token_comparator());
 }
-#if 0
+//#if 0
 SEASTAR_TEST_CASE(leveled_01) {
     auto s = make_lw_shared(schema({}, some_keyspace, some_column_family,
         {{"p1", utf8_type}}, {}, {}, {}, utf8_type));
@@ -3004,7 +3004,7 @@ SEASTAR_TEST_CASE(get_fully_expired_sstables_test) {
 
     return make_ready_future<>();
 }
-#endif
+//#endif
 SEASTAR_TEST_CASE(compaction_with_fully_expired_table) {
     return seastar::async([] {
         storage_service_for_tests ssft;
@@ -3055,7 +3055,7 @@ SEASTAR_TEST_CASE(compaction_with_fully_expired_table) {
         BOOST_REQUIRE(ret.new_sstables.empty());
     });
 }
-#if 0
+//#if 0
 SEASTAR_TEST_CASE(basic_date_tiered_strategy_test) {
     auto s = make_lw_shared(schema({}, some_keyspace, some_column_family,
         {{"p1", utf8_type}}, {}, {}, {}, utf8_type));
@@ -4591,4 +4591,4 @@ SEASTAR_TEST_CASE(sstable_partition_estimation_sanity_test) {
         }
     });
 }
-#endif
+//#endif
