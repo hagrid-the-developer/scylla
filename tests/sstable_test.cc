@@ -1249,9 +1249,6 @@ SEASTAR_TEST_CASE(promoted_index_write) {
             return compare_files(
                     "tests/sstables/large_partition/la-3-big-Index.db",
                     "tests/sstables/tests-temporary/la-100-big-Index.db");
-            //return compare_files(
-            //        "tests/sstables/large_partition/try1-data-ka-3-Index.db",
-            //        "tests/sstables/tests-temporary/try1-data-ka-100-Index.db");
         }).then([sst, mtp] {});
     });
 }
