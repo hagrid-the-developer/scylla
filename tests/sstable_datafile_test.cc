@@ -1044,7 +1044,7 @@ SEASTAR_TEST_CASE(compaction_manager_test) {
         m.set_clustered_cell(c_key, r1_col, make_atomic_cell(int32_type->decompose(1)));
         mt->apply(std::move(m));
 
-        auto sst = make_sstable(s, tmp->path, generation, la, big);
+        auto sst = make_sstable(s, tmp->path, column_family_test::calculate_generation_for_new_table(*cf), la, big);
 
         return write_memtable_to_sstable(*mt, sst).then([mt, sst, cf] {
             return sst->load().then([sst, cf] {
