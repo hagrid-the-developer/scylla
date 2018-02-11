@@ -2662,7 +2662,7 @@ SEASTAR_TEST_CASE(test_sliced_mutation_reads) {
     // insert into sliced_mutation_reads_test (pk, ck, v1) values (1, 3, 1);
     // insert into sliced_mutation_reads_test (pk, ck, v1) values (1, 5, 1);
     return seastar::async([] {
-        for (auto version: {sstables::sstable::version_types::ka, sstables::sstable::version_types::la}) {
+        for (auto version : versions) {
             auto set_of_ints_type = set_type_impl::get_instance(int32_type, true);
             auto builder = schema_builder("ks", "sliced_mutation_reads_test")
                     .with_column("pk", int32_type, column_kind::partition_key)
@@ -3941,37 +3941,39 @@ SEASTAR_TEST_CASE(sstable_resharding_strategy_tests) {
     // TODO: move it to sstable_resharding_test.cc. Unable to do so now because of linking issues
     // when using sstables::stats_metadata at sstable_resharding_test.cc.
 
-    auto s = make_lw_shared(schema({}, "ks", "cf", {{"p1", utf8_type}}, {}, {}, {}, utf8_type));
-    auto get_sstable = [&] (int64_t gen, sstring first_key, sstring last_key) mutable {
-        auto sst = make_sstable(s, "", gen, sstables::sstable::version_types::ka, sstables::sstable::format_types::big);
-        stats_metadata stats = {};
-        stats.sstable_level = 1;
-        sstables::test(sst).set_values(std::move(first_key), std::move(last_key), std::move(stats));
-        return sst;
-    };
+    for (const auto version : versions) {
+        auto s = make_lw_shared(schema({}, "ks", "cf", {{"p1", utf8_type}}, {}, {}, {}, utf8_type));
+        auto get_sstable = [&] (int64_t gen, sstring first_key, sstring last_key) mutable {
+            auto sst = make_sstable(s, "", gen, version, sstables::sstable::format_types::big);
+            stats_metadata stats = {};
+            stats.sstable_level = 1;
+            sstables::test(sst).set_values(std::move(first_key), std::move(last_key), std::move(stats));
+            return sst;
+        };
 
-    auto cm = make_lw_shared<compaction_manager>();
-    auto cl_stats = make_lw_shared<cell_locker_stats>();
-    auto cf = make_lw_shared<column_family>(s, column_family::config(), column_family::no_commitlog(), *cm, *cl_stats);
+        auto cm = make_lw_shared<compaction_manager>();
+        auto cl_stats = make_lw_shared<cell_locker_stats>();
+        auto cf = make_lw_shared<column_family>(s, column_family::config(), column_family::no_commitlog(), *cm, *cl_stats);
 
-    auto tokens = token_generation_for_current_shard(2);
-    auto stcs = sstables::make_compaction_strategy(sstables::compaction_strategy_type::size_tiered, s->compaction_strategy_options());
-    auto lcs = sstables::make_compaction_strategy(sstables::compaction_strategy_type::leveled, s->compaction_strategy_options());
+        auto tokens = token_generation_for_current_shard(2);
+        auto stcs = sstables::make_compaction_strategy(sstables::compaction_strategy_type::size_tiered, s->compaction_strategy_options());
+        auto lcs = sstables::make_compaction_strategy(sstables::compaction_strategy_type::leveled, s->compaction_strategy_options());
 
-    auto sst1 = get_sstable(1, tokens[0].first, tokens[1].first);
-    auto sst2 = get_sstable(2, tokens[1].first, tokens[1].first);
+        auto sst1 = get_sstable(1, tokens[0].first, tokens[1].first);
+        auto sst2 = get_sstable(2, tokens[1].first, tokens[1].first);
 
-    {
-        // TODO: sstable_test runs with smp::count == 1, thus we will not be able to stress it more
-        // until we move this test case to sstable_resharding_test.
-        auto descriptors = stcs.get_resharding_jobs(*cf, { sst1, sst2 });
-        BOOST_REQUIRE(descriptors.size() == 2);
-    }
-    {
-        auto ssts = std::vector<sstables::shared_sstable>{ sst1, sst2 };
-        auto descriptors = lcs.get_resharding_jobs(*cf, ssts);
-        auto expected_jobs = ssts.size()/smp::count + ssts.size()%smp::count;
-        BOOST_REQUIRE(descriptors.size() == expected_jobs);
+        {
+            // TODO: sstable_test runs with smp::count == 1, thus we will not be able to stress it more
+            // until we move this test case to sstable_resharding_test.
+            auto descriptors = stcs.get_resharding_jobs(*cf, { sst1, sst2 });
+            BOOST_REQUIRE(descriptors.size() == 2);
+        }
+        {
+            auto ssts = std::vector<sstables::shared_sstable>{ sst1, sst2 };
+            auto descriptors = lcs.get_resharding_jobs(*cf, ssts);
+            auto expected_jobs = ssts.size()/smp::count + ssts.size()%smp::count;
+            BOOST_REQUIRE(descriptors.size() == expected_jobs);
+        }
     }
 
     return make_ready_future<>();
@@ -4273,7 +4275,8 @@ SEASTAR_TEST_CASE(test_wrong_counter_shard_order) {
         // scylla-bench -mode counter_update -workload uniform -duration 15s
         //      -replication-factor 3 -partition-count 2 -clustering-row-count 4
         // on a three-node Scylla 1.7.4 cluster.
-        return seastar::async([] {
+    return seastar::async([] {
+        for (const auto version : versions) {
             auto s = schema_builder("scylla_bench", "test_counters")
                     .with_column("pk", long_type, column_kind::partition_key)
                     .with_column("ck", long_type, column_kind::clustering_key)
@@ -4284,7 +4287,7 @@ SEASTAR_TEST_CASE(test_wrong_counter_shard_order) {
                     .with_column("c5", counter_type)
                     .build();
 
-            auto sst = make_lw_shared<sstable>(s, "tests/sstables/wrong_counter_shard_order", 2, sstables::sstable::version_types::ka, big);
+            auto sst = make_lw_shared<sstable>(s, "tests/sstables/wrong_counter_shard_order", 2, version, big);
             sst->load().get0();
             auto reader = sstable_reader(sst, s);
 
@@ -4332,7 +4335,8 @@ SEASTAR_TEST_CASE(test_wrong_counter_shard_order) {
             }
 
             BOOST_REQUIRE(!reader().get0());
-        });
+        }
+    });
 }
 
 SEASTAR_TEST_CASE(compaction_correctness_with_partitioned_sstable_set) {
@@ -4461,17 +4465,19 @@ SEASTAR_TEST_CASE(test_broken_promoted_index_is_skipped) {
     // insert into ks.test (pk, ck, v) values (1, 3, 1);
     // delete from ks.test where pk = 1 and ck = 2;
     return seastar::async([] {
-        auto s = schema_builder("ks", "test")
-                .with_column("pk", int32_type, column_kind::partition_key)
-                .with_column("ck", int32_type, column_kind::clustering_key)
-                .with_column("v", int32_type)
-                .build(schema_builder::compact_storage::yes);
+        for (const auto version : versions) {
+            auto s = schema_builder("ks", "test")
+                    .with_column("pk", int32_type, column_kind::partition_key)
+                    .with_column("ck", int32_type, column_kind::clustering_key)
+                    .with_column("v", int32_type)
+                    .build(schema_builder::compact_storage::yes);
 
-        auto sst = sstables::make_sstable(s, "tests/sstables/broken_non_compound_pi_and_range_tombstone", 1, sstables::sstable::version_types::ka, big);
-        sst->load().get0();
+            auto sst = sstables::make_sstable(s, "tests/sstables/broken_non_compound_pi_and_range_tombstone", 1, version, big);
+            sst->load().get0();
 
-        {
-            assert_that(sst->get_index_reader(default_priority_class())).is_empty(*s);
+            {
+                assert_that(sst->get_index_reader(default_priority_class())).is_empty(*s);
+            }
         }
     });
 }
@@ -4486,27 +4492,29 @@ SEASTAR_TEST_CASE(test_old_format_non_compound_range_tombstone_is_read) {
     // insert into ks.test (pk, ck, v) values (1, 3, 1);
     // delete from ks.test where pk = 1 and ck = 2;
     return seastar::async([] {
-        auto s = schema_builder("ks", "test")
-                .with_column("pk", int32_type, column_kind::partition_key)
-                .with_column("ck", int32_type, column_kind::clustering_key)
-                .with_column("v", int32_type)
-                .build(schema_builder::compact_storage::yes);
+        for (const auto version : versions) {
+            auto s = schema_builder("ks", "test")
+                    .with_column("pk", int32_type, column_kind::partition_key)
+                    .with_column("ck", int32_type, column_kind::clustering_key)
+                    .with_column("v", int32_type)
+                    .build(schema_builder::compact_storage::yes);
 
-        auto sst = sstables::make_sstable(s, "tests/sstables/broken_non_compound_pi_and_range_tombstone", 1, sstables::sstable::version_types::ka, big);
-        sst->load().get0();
+            auto sst = sstables::make_sstable(s, "tests/sstables/broken_non_compound_pi_and_range_tombstone", 1, version, big);
+            sst->load().get0();
 
-        auto pk = partition_key::from_exploded(*s, { int32_type->decompose(1) });
-        auto dk = dht::global_partitioner().decorate_key(*s, pk);
-        auto ck = clustering_key::from_exploded(*s, {int32_type->decompose(2)});
-        mutation m(s, dk);
-        m.set_clustered_cell(ck, *s->get_column_definition("v"), atomic_cell::make_live(1511270919978349, int32_type->decompose(1), { }));
-        m.partition().apply_delete(*s, ck, {1511270943827278, gc_clock::from_time_t(1511270943)});
+            auto pk = partition_key::from_exploded(*s, { int32_type->decompose(1) });
+            auto dk = dht::global_partitioner().decorate_key(*s, pk);
+            auto ck = clustering_key::from_exploded(*s, {int32_type->decompose(2)});
+            mutation m(s, dk);
+            m.set_clustered_cell(ck, *s->get_column_definition("v"), atomic_cell::make_live(1511270919978349, int32_type->decompose(1), { }));
+            m.partition().apply_delete(*s, ck, {1511270943827278, gc_clock::from_time_t(1511270943)});
 
-        {
-            auto slice = partition_slice_builder(*s).with_range(query::clustering_range::make_singular({ck})).build();
-            assert_that(sst->as_mutation_source().make_reader(s, dht::partition_range::make_singular(dk), slice))
-                    .produces(m)
-                    .produces_end_of_stream();
+            {
+                auto slice = partition_slice_builder(*s).with_range(query::clustering_range::make_singular({ck})).build();
+                assert_that(sst->as_mutation_source().make_reader(s, dht::partition_range::make_singular(dk), slice))
+                        .produces(m)
+                        .produces_end_of_stream();
+            }
         }
     });
 }
