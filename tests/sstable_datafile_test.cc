@@ -2795,31 +2795,32 @@ SEASTAR_TEST_CASE(test_wrong_range_tombstone_order) {
 }
 
 SEASTAR_TEST_CASE(test_counter_read) {
-        // create table counter_test (
-        //      pk int,
-        //      ck int,
-        //      c1 counter,
-        //      c2 counter,
-        //      primary key (pk, ck)
-        // );
-        //
-        // Node 1:
-        // update counter_test set c1 = c1 + 8 where pk = 0 and ck = 0;
-        // update counter_test set c2 = c2 - 99 where pk = 0 and ck = 0;
-        // update counter_test set c1 = c1 + 3 where pk = 0 and ck = 0;
-        // update counter_test set c1 = c1 + 42 where pk = 0 and ck = 1;
-        //
-        // Node 2:
-        // update counter_test set c2 = c2 + 7 where pk = 0 and ck = 0;
-        // update counter_test set c1 = c1 + 2 where pk = 0 and ck = 0;
-        // delete c1 from counter_test where pk = 0 and ck = 1;
-        //
-        // select * from counter_test;
-        // pk | ck | c1 | c2
-        // ----+----+----+-----
-        //  0 |  0 | 13 | -92
+    // create table counter_test (
+    //      pk int,
+    //      ck int,
+    //      c1 counter,
+    //      c2 counter,
+    //      primary key (pk, ck)
+    // );
+    //
+    // Node 1:
+    // update counter_test set c1 = c1 + 8 where pk = 0 and ck = 0;
+    // update counter_test set c2 = c2 - 99 where pk = 0 and ck = 0;
+    // update counter_test set c1 = c1 + 3 where pk = 0 and ck = 0;
+    // update counter_test set c1 = c1 + 42 where pk = 0 and ck = 1;
+    //
+    // Node 2:
+    // update counter_test set c2 = c2 + 7 where pk = 0 and ck = 0;
+    // update counter_test set c1 = c1 + 2 where pk = 0 and ck = 0;
+    // delete c1 from counter_test where pk = 0 and ck = 1;
+    //
+    // select * from counter_test;
+    // pk | ck | c1 | c2
+    // ----+----+----+-----
+    //  0 |  0 | 13 | -92
 
-        return seastar::async([] {
+    return seastar::async([] {
+        for (const auto version : versions) {
             auto s = schema_builder("ks", "counter_test")
                     .with_column("pk", int32_type, column_kind::partition_key)
                     .with_column("ck", int32_type, column_kind::clustering_key)
@@ -2830,7 +2831,7 @@ SEASTAR_TEST_CASE(test_counter_read) {
             auto node1 = counter_id(utils::UUID("8379ab99-4507-4ab1-805d-ac85a863092b"));
             auto node2 = counter_id(utils::UUID("b8a6c3f3-e222-433f-9ce9-de56a8466e07"));
 
-            auto sst = make_sstable(s, "tests/sstables/counter_test", 5, sstables::sstable::version_types::ka, big);
+            auto sst = make_sstable(s, "tests/sstables/counter_test", 5, version, big);
             sst->load().get();
             auto reader = sstable_reader(sst, s);
 
@@ -2885,7 +2886,8 @@ SEASTAR_TEST_CASE(test_counter_read) {
 
             mfopt = reader().get0();
             BOOST_REQUIRE(!mfopt);
-        });
+        }
+    });
 }
 
 SEASTAR_TEST_CASE(test_sstable_max_local_deletion_time) {
@@ -3304,28 +3306,30 @@ SEASTAR_TEST_CASE(test_promoted_index_read) {
     // ]
 
     return seastar::async([] {
-        auto s = schema_builder("ks", "promoted_index_read")
-                .with_column("pk", int32_type, column_kind::partition_key)
-                .with_column("ck1", int32_type, column_kind::clustering_key)
-                .with_column("ck2", int32_type, column_kind::clustering_key)
-                .with_column("v", int32_type)
-                .build();
+        for (const auto version : versions) {
+            auto s = schema_builder("ks", "promoted_index_read")
+                    .with_column("pk", int32_type, column_kind::partition_key)
+                    .with_column("ck1", int32_type, column_kind::clustering_key)
+                    .with_column("ck2", int32_type, column_kind::clustering_key)
+                    .with_column("v", int32_type)
+                    .build();
 
-        auto sst = make_sstable(s, "tests/sstables/promoted_index_read", 1, sstables::sstable::version_types::ka, big);
-        sst->load().get0();
+            auto sst = make_sstable(s, "tests/sstables/promoted_index_read", 1, version, big);
+            sst->load().get0();
 
-        auto pkey = partition_key::from_exploded(*s, { int32_type->decompose(0) });
-        auto dkey = dht::global_partitioner().decorate_key(*s, std::move(pkey));
+            auto pkey = partition_key::from_exploded(*s, { int32_type->decompose(0) });
+            auto dkey = dht::global_partitioner().decorate_key(*s, std::move(pkey));
 
-        auto rd = sstable_reader(sst, s);
-        using kind = mutation_fragment::kind;
-        assert_that(std::move(rd))
-                .produces_partition_start(dkey)
-                .produces(kind::range_tombstone, { 0 })
-                .produces(kind::clustering_row, { 0, 0 })
-                .produces(kind::clustering_row, { 0, 1 })
-                .produces_partition_end()
-                .produces_end_of_stream();
+            auto rd = sstable_reader(sst, s);
+            using kind = mutation_fragment::kind;
+            assert_that(std::move(rd))
+                    .produces_partition_start(dkey)
+                    .produces(kind::range_tombstone, { 0 })
+                    .produces(kind::clustering_row, { 0, 0 })
+                    .produces(kind::clustering_row, { 0, 1 })
+                    .produces_partition_end()
+                    .produces_end_of_stream();
+        }
     });
 }
 
@@ -3572,62 +3576,64 @@ SEASTAR_TEST_CASE(sstable_tombstone_metadata_check) {
 
 SEASTAR_TEST_CASE(test_partition_skipping) {
     return seastar::async([] {
-        auto s = schema_builder("ks", "test_skipping_partitions")
-                .with_column("pk", int32_type, column_kind::partition_key)
-                .with_column("v", int32_type)
-                .build();
+        for (const auto version : versions) {
+            auto s = schema_builder("ks", "test_skipping_partitions")
+                    .with_column("pk", int32_type, column_kind::partition_key)
+                    .with_column("v", int32_type)
+                    .build();
 
-        auto sst = make_sstable(s, "tests/sstables/partition_skipping", 1, sstables::sstable::version_types::ka, big);
-        sst->load().get0();
+            auto sst = make_sstable(s, "tests/sstables/partition_skipping", 1, version, big);
+            sst->load().get0();
 
-        std::vector<dht::decorated_key> keys;
-        for (int i = 0; i < 10; i++) {
-            auto pk = partition_key::from_single_value(*s, int32_type->decompose(i));
-            keys.emplace_back(dht::global_partitioner().decorate_key(*s, std::move(pk)));
+            std::vector<dht::decorated_key> keys;
+            for (int i = 0; i < 10; i++) {
+                auto pk = partition_key::from_single_value(*s, int32_type->decompose(i));
+                keys.emplace_back(dht::global_partitioner().decorate_key(*s, std::move(pk)));
+            }
+            dht::decorated_key::less_comparator cmp(s);
+            std::sort(keys.begin(), keys.end(), cmp);
+
+            assert_that(sstable_reader(sst, s)).produces(keys);
+
+            auto pr = dht::partition_range::make(dht::ring_position(keys[0]), dht::ring_position(keys[1]));
+            assert_that(sstable_reader(sst, s, pr))
+                    .produces(keys[0])
+                    .produces(keys[1])
+                    .produces_end_of_stream()
+                    .fast_forward_to(dht::partition_range::make_starting_with(dht::ring_position(keys[8])))
+                    .produces(keys[8])
+                    .produces(keys[9])
+                    .produces_end_of_stream();
+
+            pr = dht::partition_range::make(dht::ring_position(keys[1]), dht::ring_position(keys[1]));
+            assert_that(sstable_reader(sst, s, pr))
+                    .produces(keys[1])
+                    .produces_end_of_stream()
+                    .fast_forward_to(dht::partition_range::make(dht::ring_position(keys[3]), dht::ring_position(keys[4])))
+                    .produces(keys[3])
+                    .produces(keys[4])
+                    .produces_end_of_stream()
+                    .fast_forward_to(dht::partition_range::make({ dht::ring_position(keys[4]), false }, dht::ring_position(keys[5])))
+                    .produces(keys[5])
+                    .produces_end_of_stream()
+                    .fast_forward_to(dht::partition_range::make(dht::ring_position(keys[6]), dht::ring_position(keys[6])))
+                    .produces(keys[6])
+                    .produces_end_of_stream()
+                    .fast_forward_to(dht::partition_range::make(dht::ring_position(keys[7]), dht::ring_position(keys[8])))
+                    .produces(keys[7])
+                    .fast_forward_to(dht::partition_range::make(dht::ring_position(keys[9]), dht::ring_position(keys[9])))
+                    .produces(keys[9])
+                    .produces_end_of_stream();
+
+            pr = dht::partition_range::make({ dht::ring_position(keys[0]), false }, { dht::ring_position(keys[1]), false});
+            assert_that(sstable_reader(sst, s, pr))
+                    .produces_end_of_stream()
+                    .fast_forward_to(dht::partition_range::make(dht::ring_position(keys[6]), dht::ring_position(keys[6])))
+                    .produces(keys[6])
+                    .produces_end_of_stream()
+                    .fast_forward_to(dht::partition_range::make({ dht::ring_position(keys[8]), false }, { dht::ring_position(keys[9]), false }))
+                    .produces_end_of_stream();
         }
-        dht::decorated_key::less_comparator cmp(s);
-        std::sort(keys.begin(), keys.end(), cmp);
-
-        assert_that(sstable_reader(sst, s)).produces(keys);
-
-        auto pr = dht::partition_range::make(dht::ring_position(keys[0]), dht::ring_position(keys[1]));
-        assert_that(sstable_reader(sst, s, pr))
-            .produces(keys[0])
-            .produces(keys[1])
-            .produces_end_of_stream()
-            .fast_forward_to(dht::partition_range::make_starting_with(dht::ring_position(keys[8])))
-            .produces(keys[8])
-            .produces(keys[9])
-            .produces_end_of_stream();
-
-        pr = dht::partition_range::make(dht::ring_position(keys[1]), dht::ring_position(keys[1]));
-        assert_that(sstable_reader(sst, s, pr))
-            .produces(keys[1])
-            .produces_end_of_stream()
-            .fast_forward_to(dht::partition_range::make(dht::ring_position(keys[3]), dht::ring_position(keys[4])))
-            .produces(keys[3])
-            .produces(keys[4])
-            .produces_end_of_stream()
-            .fast_forward_to(dht::partition_range::make({ dht::ring_position(keys[4]), false }, dht::ring_position(keys[5])))
-            .produces(keys[5])
-            .produces_end_of_stream()
-            .fast_forward_to(dht::partition_range::make(dht::ring_position(keys[6]), dht::ring_position(keys[6])))
-            .produces(keys[6])
-            .produces_end_of_stream()
-            .fast_forward_to(dht::partition_range::make(dht::ring_position(keys[7]), dht::ring_position(keys[8])))
-            .produces(keys[7])
-            .fast_forward_to(dht::partition_range::make(dht::ring_position(keys[9]), dht::ring_position(keys[9])))
-            .produces(keys[9])
-            .produces_end_of_stream();
-
-        pr = dht::partition_range::make({ dht::ring_position(keys[0]), false }, { dht::ring_position(keys[1]), false});
-        assert_that(sstable_reader(sst, s, pr))
-            .produces_end_of_stream()
-            .fast_forward_to(dht::partition_range::make(dht::ring_position(keys[6]), dht::ring_position(keys[6])))
-            .produces(keys[6])
-            .produces_end_of_stream()
-            .fast_forward_to(dht::partition_range::make({ dht::ring_position(keys[8]), false }, { dht::ring_position(keys[9]), false }))
-            .produces_end_of_stream();
     });
 }
 
