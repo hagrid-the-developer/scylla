@@ -3639,9 +3639,9 @@ SEASTAR_TEST_CASE(test_partition_skipping) {
 
 // Must be run in a seastar thread
 static
-shared_sstable make_sstable(sstring path, flat_mutation_reader rd, sstable_writer_config cfg) {
+shared_sstable make_sstable_easy(sstring path, flat_mutation_reader rd, sstable_writer_config cfg, const sstables::sstable::version_types version) {
     auto s = rd.schema();
-    auto sst = make_sstable(s, path, 1, sstables::sstable::version_types::ka, big);
+    auto sst = make_sstable(s, path, 1, version, big);
     sst->write_components(std::move(rd), 1, s, cfg).get();
     sst->load().get();
     return sst;
@@ -3649,172 +3649,176 @@ shared_sstable make_sstable(sstring path, flat_mutation_reader rd, sstable_write
 
 SEASTAR_TEST_CASE(test_repeated_tombstone_skipping) {
     return seastar::async([] {
-        storage_service_for_tests ssft;
-        simple_schema table;
+        for (const auto version : versions) {
+            storage_service_for_tests ssft;
+            simple_schema table;
 
-        std::vector<mutation_fragment> fragments;
+            std::vector<mutation_fragment> fragments;
 
-        uint32_t count = 1000; // large enough to cross index block several times
+            uint32_t count = 1000; // large enough to cross index block several times
 
-        auto rt = table.make_range_tombstone(query::clustering_range::make(
-            query::clustering_range::bound(table.make_ckey(0), true),
-            query::clustering_range::bound(table.make_ckey(count - 1), true)
-        ));
+            auto rt = table.make_range_tombstone(query::clustering_range::make(
+                                                     query::clustering_range::bound(table.make_ckey(0), true),
+                                                     query::clustering_range::bound(table.make_ckey(count - 1), true)
+                                                     ));
 
-        fragments.push_back(mutation_fragment(range_tombstone(rt)));
+            fragments.push_back(mutation_fragment(range_tombstone(rt)));
 
-        std::vector<range_tombstone> rts;
+            std::vector<range_tombstone> rts;
 
-        uint32_t seq = 1;
-        while (seq < count) {
-            rts.push_back(table.make_range_tombstone(query::clustering_range::make(
-                query::clustering_range::bound(table.make_ckey(seq), true),
-                query::clustering_range::bound(table.make_ckey(seq + 1), false)
-            )));
-            fragments.push_back(range_tombstone(rts.back()));
-            ++seq;
+            uint32_t seq = 1;
+            while (seq < count) {
+                rts.push_back(table.make_range_tombstone(query::clustering_range::make(
+                                                             query::clustering_range::bound(table.make_ckey(seq), true),
+                                                             query::clustering_range::bound(table.make_ckey(seq + 1), false)
+                                                             )));
+                fragments.push_back(range_tombstone(rts.back()));
+                ++seq;
 
-            fragments.push_back(table.make_row(table.make_ckey(seq), make_random_string(1)));
-            ++seq;
-        }
+                fragments.push_back(table.make_row(table.make_ckey(seq), make_random_string(1)));
+                ++seq;
+            }
 
-        tmpdir dir;
-        sstable_writer_config cfg;
-        cfg.promoted_index_block_size = 100;
-        auto mut = mutation(table.schema(), table.make_pkey("key"));
-        for (auto&& mf : fragments) {
-            mut.apply(mf);
-        }
-        auto sst = make_sstable(dir.path,  flat_mutation_reader_from_mutations({ std::move(mut) }), cfg);
-        auto ms = as_mutation_source(sst);
+            tmpdir dir;
+            sstable_writer_config cfg;
+            cfg.promoted_index_block_size = 100;
+            auto mut = mutation(table.schema(), table.make_pkey("key"));
+            for (auto&& mf : fragments) {
+                mut.apply(mf);
+            }
+            auto sst = make_sstable_easy(dir.path,  flat_mutation_reader_from_mutations({ std::move(mut) }), cfg, version);
+            auto ms = as_mutation_source(sst);
 
-        for (uint32_t i = 3; i < seq; i++) {
-            auto ck1 = table.make_ckey(1);
-            auto ck2 = table.make_ckey((1 + i) / 2);
-            auto ck3 = table.make_ckey(i);
-            BOOST_TEST_MESSAGE(sprint("checking %s %s", ck2, ck3));
-            auto slice = partition_slice_builder(*table.schema())
-                .with_range(query::clustering_range::make_singular(ck1))
-                .with_range(query::clustering_range::make_singular(ck2))
-                .with_range(query::clustering_range::make_singular(ck3))
-                .build();
-            flat_mutation_reader rd = ms.make_reader(table.schema(), query::full_partition_range, slice);
-            assert_that(std::move(rd)).has_monotonic_positions();
+            for (uint32_t i = 3; i < seq; i++) {
+                auto ck1 = table.make_ckey(1);
+                auto ck2 = table.make_ckey((1 + i) / 2);
+                auto ck3 = table.make_ckey(i);
+                BOOST_TEST_MESSAGE(sprint("checking %s %s", ck2, ck3));
+                auto slice = partition_slice_builder(*table.schema())
+                        .with_range(query::clustering_range::make_singular(ck1))
+                        .with_range(query::clustering_range::make_singular(ck2))
+                        .with_range(query::clustering_range::make_singular(ck3))
+                        .build();
+                flat_mutation_reader rd = ms.make_reader(table.schema(), query::full_partition_range, slice);
+                assert_that(std::move(rd)).has_monotonic_positions();
+            }
         }
     });
 }
 
 SEASTAR_TEST_CASE(test_skipping_using_index) {
     return seastar::async([] {
-        storage_service_for_tests ssft;
-        simple_schema table;
+        for (const auto version : versions) {
+            storage_service_for_tests ssft;
+            simple_schema table;
 
-        const unsigned rows_per_part = 10;
-        const unsigned partition_count = 10;
+            const unsigned rows_per_part = 10;
+            const unsigned partition_count = 10;
 
-        std::vector<dht::decorated_key> keys;
-        for (unsigned i = 0; i < partition_count; ++i) {
-            keys.push_back(table.make_pkey(i));
-        }
-        std::sort(keys.begin(), keys.end(), dht::decorated_key::less_comparator(table.schema()));
-
-        std::vector<mutation> partitions;
-        uint32_t row_id = 0;
-        for (auto&& key : keys) {
-            mutation m(table.schema(), key);
-            for (unsigned j = 0; j < rows_per_part; ++j) {
-                table.add_row(m, table.make_ckey(row_id++), make_random_string(1));
+            std::vector<dht::decorated_key> keys;
+            for (unsigned i = 0; i < partition_count; ++i) {
+                keys.push_back(table.make_pkey(i));
             }
-            partitions.emplace_back(std::move(m));
-        }
+            std::sort(keys.begin(), keys.end(), dht::decorated_key::less_comparator(table.schema()));
 
-        std::sort(partitions.begin(), partitions.end(), mutation_decorated_key_less_comparator());
-
-        tmpdir dir;
-        sstable_writer_config cfg;
-        cfg.promoted_index_block_size = 1; // So that every fragment is indexed
-        auto sst = make_sstable(dir.path, flat_mutation_reader_from_mutations(partitions), cfg);
-
-        auto ms = as_mutation_source(sst);
-        auto rd = ms.make_reader(table.schema(),
-            query::full_partition_range,
-            table.schema()->full_slice(),
-            default_priority_class(),
-            nullptr,
-            streamed_mutation::forwarding::yes,
-            mutation_reader::forwarding::yes);
-
-        auto assertions = assert_that(std::move(rd));
-        // Consume first partition completely so that index is stale
-        {
-            assertions
-                .produces_partition_start(keys[0])
-                .fast_forward_to(position_range::all_clustered_rows());
-            for (auto i = 0; i < rows_per_part; i++) {
-                assertions.produces_row_with_key(table.make_ckey(i));
+            std::vector<mutation> partitions;
+            uint32_t row_id = 0;
+            for (auto&& key : keys) {
+                mutation m(table.schema(), key);
+                for (unsigned j = 0; j < rows_per_part; ++j) {
+                    table.add_row(m, table.make_ckey(row_id++), make_random_string(1));
+                }
+                partitions.emplace_back(std::move(m));
             }
-            assertions.produces_end_of_stream();
-        }
 
-        {
-            auto base = rows_per_part;
-            assertions
-                .next_partition()
-                .produces_partition_start(keys[1])
-                .fast_forward_to(position_range(
-                    position_in_partition::for_key(table.make_ckey(base)),
-                    position_in_partition::for_key(table.make_ckey(base + 3))))
-                .produces_row_with_key(table.make_ckey(base))
-                .produces_row_with_key(table.make_ckey(base + 1))
-                .produces_row_with_key(table.make_ckey(base + 2))
-                .fast_forward_to(position_range(
-                    position_in_partition::for_key(table.make_ckey(base + 5)),
-                    position_in_partition::for_key(table.make_ckey(base + 6))))
-                .produces_row_with_key(table.make_ckey(base + 5))
-                .produces_end_of_stream()
-                .fast_forward_to(position_range(
-                    position_in_partition::for_key(table.make_ckey(base + rows_per_part)), // Skip all rows in current partition
-                    position_in_partition::after_all_clustered_rows()))
-                .produces_end_of_stream();
-        }
+            std::sort(partitions.begin(), partitions.end(), mutation_decorated_key_less_comparator());
 
-        // Consume few fragments then skip
-        {
-            auto base = rows_per_part * 2;
-            assertions
-                .next_partition()
-                .produces_partition_start(keys[2])
-                .fast_forward_to(position_range(
-                    position_in_partition::for_key(table.make_ckey(base)),
-                    position_in_partition::for_key(table.make_ckey(base + 3))))
-                .produces_row_with_key(table.make_ckey(base))
-                .produces_row_with_key(table.make_ckey(base + 1))
-                .produces_row_with_key(table.make_ckey(base + 2))
-                .fast_forward_to(position_range(
-                    position_in_partition::for_key(table.make_ckey(base + rows_per_part - 1)), // last row
-                    position_in_partition::after_all_clustered_rows()))
-                .produces_row_with_key(table.make_ckey(base + rows_per_part - 1))
-                .produces_end_of_stream();
-        }
+            tmpdir dir;
+            sstable_writer_config cfg;
+            cfg.promoted_index_block_size = 1; // So that every fragment is indexed
+            auto sst = make_sstable_easy(dir.path, flat_mutation_reader_from_mutations(partitions), cfg, version);
 
-        // Consume nothing from the next partition
-        {
-            assertions
-                .next_partition()
-                .produces_partition_start(keys[3])
-                .next_partition();
-        }
+            auto ms = as_mutation_source(sst);
+            auto rd = ms.make_reader(table.schema(),
+                                     query::full_partition_range,
+                                     table.schema()->full_slice(),
+                                     default_priority_class(),
+                                     nullptr,
+                                     streamed_mutation::forwarding::yes,
+                                     mutation_reader::forwarding::yes);
 
-        {
-            auto base = rows_per_part * 4;
-            assertions
-                .next_partition()
-                .produces_partition_start(keys[4])
-                .fast_forward_to(position_range(
-                    position_in_partition::for_key(table.make_ckey(base + rows_per_part - 1)), // last row
-                    position_in_partition::after_all_clustered_rows()))
-                .produces_row_with_key(table.make_ckey(base + rows_per_part - 1))
-                .produces_end_of_stream();
+            auto assertions = assert_that(std::move(rd));
+            // Consume first partition completely so that index is stale
+            {
+                assertions
+                        .produces_partition_start(keys[0])
+                        .fast_forward_to(position_range::all_clustered_rows());
+                for (auto i = 0; i < rows_per_part; i++) {
+                    assertions.produces_row_with_key(table.make_ckey(i));
+                }
+                assertions.produces_end_of_stream();
+            }
+
+            {
+                auto base = rows_per_part;
+                assertions
+                        .next_partition()
+                        .produces_partition_start(keys[1])
+                        .fast_forward_to(position_range(
+                                             position_in_partition::for_key(table.make_ckey(base)),
+                                             position_in_partition::for_key(table.make_ckey(base + 3))))
+                        .produces_row_with_key(table.make_ckey(base))
+                        .produces_row_with_key(table.make_ckey(base + 1))
+                        .produces_row_with_key(table.make_ckey(base + 2))
+                        .fast_forward_to(position_range(
+                                             position_in_partition::for_key(table.make_ckey(base + 5)),
+                                             position_in_partition::for_key(table.make_ckey(base + 6))))
+                        .produces_row_with_key(table.make_ckey(base + 5))
+                        .produces_end_of_stream()
+                        .fast_forward_to(position_range(
+                                             position_in_partition::for_key(table.make_ckey(base + rows_per_part)), // Skip all rows in current partition
+                                             position_in_partition::after_all_clustered_rows()))
+                        .produces_end_of_stream();
+            }
+
+            // Consume few fragments then skip
+            {
+                auto base = rows_per_part * 2;
+                assertions
+                        .next_partition()
+                        .produces_partition_start(keys[2])
+                        .fast_forward_to(position_range(
+                                             position_in_partition::for_key(table.make_ckey(base)),
+                                             position_in_partition::for_key(table.make_ckey(base + 3))))
+                        .produces_row_with_key(table.make_ckey(base))
+                        .produces_row_with_key(table.make_ckey(base + 1))
+                        .produces_row_with_key(table.make_ckey(base + 2))
+                        .fast_forward_to(position_range(
+                                             position_in_partition::for_key(table.make_ckey(base + rows_per_part - 1)), // last row
+                                             position_in_partition::after_all_clustered_rows()))
+                        .produces_row_with_key(table.make_ckey(base + rows_per_part - 1))
+                        .produces_end_of_stream();
+            }
+
+            // Consume nothing from the next partition
+            {
+                assertions
+                        .next_partition()
+                        .produces_partition_start(keys[3])
+                        .next_partition();
+            }
+
+            {
+                auto base = rows_per_part * 4;
+                assertions
+                        .next_partition()
+                        .produces_partition_start(keys[4])
+                        .fast_forward_to(position_range(
+                                             position_in_partition::for_key(table.make_ckey(base + rows_per_part - 1)), // last row
+                                             position_in_partition::after_all_clustered_rows()))
+                        .produces_row_with_key(table.make_ckey(base + rows_per_part - 1))
+                        .produces_end_of_stream();
+            }
         }
     });
 }
