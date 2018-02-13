@@ -1193,9 +1193,6 @@ SEASTAR_TEST_CASE(test_promoted_index_repeats_open_tombstones) {
             auto mt = make_lw_shared<memtable>(s);
             mt->apply(m);
 
-            std::cerr << "XYZ: dir: " << dir->path << "; " << std::endl;
-            ::system(seastar::sprint("ls -la '%s'", dir->path.c_str()).c_str());
-
             auto sst = sstables::make_sstable(s,
                                               dir->path,
                                               generation,
@@ -1246,8 +1243,6 @@ SEASTAR_TEST_CASE(test_promoted_index_repeats_open_tombstones_la) {
             auto mt = make_lw_shared<memtable>(s);
             mt->apply(m);
 
-            std::cerr << "XYZ: dir: " << dir->path << "; " << std::endl;
-            ::system(seastar::sprint("ls -la '%s'", dir->path.c_str()).c_str());
             auto sst = sstables::make_sstable(s,
                                               dir->path,
                                               generation,
