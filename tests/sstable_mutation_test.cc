@@ -21,6 +21,7 @@
 
 
 #include <boost/test/unit_test.hpp>
+#include <cstdlib>
 #include "tests/test-utils.hh"
 #include "sstable_test.hh"
 #include "sstables/key.hh"
@@ -1168,7 +1169,8 @@ SEASTAR_TEST_CASE(test_promoted_index_repeats_open_tombstones) {
         auto dir = make_lw_shared<tmpdir>();
         int id = 0;
         for (auto& compact : { schema_builder::compact_storage::no, schema_builder::compact_storage::yes }) {
-            schema_builder builder("ks", sprint("cf%d", id++));
+            const auto generation = id++;
+            schema_builder builder("ks", sprint("cf%d", generation));
             builder.with_column("p", utf8_type, column_kind::partition_key);
             builder.with_column("c1", bytes_type, column_kind::clustering_key);
             builder.with_column("v", int32_type);
@@ -1191,9 +1193,12 @@ SEASTAR_TEST_CASE(test_promoted_index_repeats_open_tombstones) {
             auto mt = make_lw_shared<memtable>(s);
             mt->apply(m);
 
+            std::cerr << "XYZ: dir: " << dir->path << "; " << std::endl;
+            ::system(seastar::sprint("ls -la '%s'", dir->path.c_str()).c_str());
+
             auto sst = sstables::make_sstable(s,
                                               dir->path,
-                                              1 /* generation */,
+                                              generation,
                                               sstables::sstable::version_types::ka,
                                               sstables::sstable::format_types::big);
             sstable_writer_config cfg;
@@ -1217,7 +1222,8 @@ SEASTAR_TEST_CASE(test_promoted_index_repeats_open_tombstones_la) {
         auto dir = make_lw_shared<tmpdir>();
         int id = 0;
         for (auto& compact : { schema_builder::compact_storage::no, schema_builder::compact_storage::yes }) {
-            schema_builder builder("ks", sprint("cf%d", id++));
+            const auto generation = id++;
+            schema_builder builder("ks", sprint("cf%d", generation));
             builder.with_column("p", utf8_type, column_kind::partition_key);
             builder.with_column("c1", bytes_type, column_kind::clustering_key);
             builder.with_column("v", int32_type);
@@ -1240,9 +1246,11 @@ SEASTAR_TEST_CASE(test_promoted_index_repeats_open_tombstones_la) {
             auto mt = make_lw_shared<memtable>(s);
             mt->apply(m);
 
+            std::cerr << "XYZ: dir: " << dir->path << "; " << std::endl;
+            ::system(seastar::sprint("ls -la '%s'", dir->path.c_str()).c_str());
             auto sst = sstables::make_sstable(s,
                                               dir->path,
-                                              1 /* generation */,
+                                              generation,
                                               sstables::sstable::version_types::la,
                                               sstables::sstable::format_types::big);
             sstable_writer_config cfg;
