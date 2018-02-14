@@ -2275,10 +2275,8 @@ SEASTAR_TEST_CASE(check_overlapping) {
     return make_ready_future<>();
 }
 
-static const std::vector versions{sstables::sstable::version_types::ka, sstables::sstable::version_types::la};
-
 SEASTAR_TEST_CASE(check_read_indexes) {
-    return seastar::do_for_each(versions, [] (const auto version) {
+    return seastar::do_for_each(get_all_version_types(), [] (const auto version) {
         auto builder = schema_builder("test", "summary_test")
                 .with_column("a", int32_type, column_kind::partition_key);
         builder.set_min_index_interval(256);
@@ -2513,7 +2511,7 @@ SEASTAR_TEST_CASE(check_multi_schema) {
     //        d int,
     //        e blob
     //);
-    return seastar::do_for_each(versions, [] (const auto version) {
+    return seastar::do_for_each(get_all_version_types(), [] (const auto version) {
         auto set_of_ints_type = set_type_impl::get_instance(int32_type, true);
         auto builder = schema_builder("test", "test_multi_schema")
                 .with_column("a", int32_type, column_kind::partition_key)
@@ -2662,7 +2660,7 @@ SEASTAR_TEST_CASE(test_sliced_mutation_reads) {
     // insert into sliced_mutation_reads_test (pk, ck, v1) values (1, 3, 1);
     // insert into sliced_mutation_reads_test (pk, ck, v1) values (1, 5, 1);
     return seastar::async([] {
-        for (auto version : versions) {
+        for (auto version : get_all_version_types()) {
             auto set_of_ints_type = set_type_impl::get_instance(int32_type, true);
             auto builder = schema_builder("ks", "sliced_mutation_reads_test")
                     .with_column("pk", int32_type, column_kind::partition_key)
@@ -2753,7 +2751,7 @@ SEASTAR_TEST_CASE(test_wrong_range_tombstone_order) {
     // delete from wrong_range_tombstone_order where p = 0 and a = 2 and b = 2;
 
     return seastar::async([] {
-        for (const auto version : versions) {
+        for (const auto version : get_all_version_types()) {
             auto s = schema_builder("ks", "wrong_range_tombstone_order")
                     .with(schema_builder::compact_storage::yes)
                     .with_column("p", int32_type, column_kind::partition_key)
@@ -2820,7 +2818,7 @@ SEASTAR_TEST_CASE(test_counter_read) {
     //  0 |  0 | 13 | -92
 
     return seastar::async([] {
-        for (const auto version : versions) {
+        for (const auto version : get_all_version_types()) {
             auto s = schema_builder("ks", "counter_test")
                     .with_column("pk", int32_type, column_kind::partition_key)
                     .with_column("ck", int32_type, column_kind::clustering_key)
@@ -3306,7 +3304,7 @@ SEASTAR_TEST_CASE(test_promoted_index_read) {
     // ]
 
     return seastar::async([] {
-        for (const auto version : versions) {
+        for (const auto version : get_all_version_types()) {
             auto s = schema_builder("ks", "promoted_index_read")
                     .with_column("pk", int32_type, column_kind::partition_key)
                     .with_column("ck1", int32_type, column_kind::clustering_key)
@@ -3576,7 +3574,7 @@ SEASTAR_TEST_CASE(sstable_tombstone_metadata_check) {
 
 SEASTAR_TEST_CASE(test_partition_skipping) {
     return seastar::async([] {
-        for (const auto version : versions) {
+        for (const auto version : get_all_version_types()) {
             auto s = schema_builder("ks", "test_skipping_partitions")
                     .with_column("pk", int32_type, column_kind::partition_key)
                     .with_column("v", int32_type)
@@ -3649,7 +3647,7 @@ shared_sstable make_sstable_easy(sstring path, flat_mutation_reader rd, sstable_
 
 SEASTAR_TEST_CASE(test_repeated_tombstone_skipping) {
     return seastar::async([] {
-        for (const auto version : versions) {
+        for (const auto version : get_all_version_types()) {
             storage_service_for_tests ssft;
             simple_schema table;
 
@@ -3708,7 +3706,7 @@ SEASTAR_TEST_CASE(test_repeated_tombstone_skipping) {
 
 SEASTAR_TEST_CASE(test_skipping_using_index) {
     return seastar::async([] {
-        for (const auto version : versions) {
+        for (const auto version : get_all_version_types()) {
             storage_service_for_tests ssft;
             simple_schema table;
 
@@ -3941,7 +3939,7 @@ SEASTAR_TEST_CASE(sstable_resharding_strategy_tests) {
     // TODO: move it to sstable_resharding_test.cc. Unable to do so now because of linking issues
     // when using sstables::stats_metadata at sstable_resharding_test.cc.
 
-    for (const auto version : versions) {
+    for (const auto version : get_all_version_types()) {
         auto s = make_lw_shared(schema({}, "ks", "cf", {{"p1", utf8_type}}, {}, {}, {}, utf8_type));
         auto get_sstable = [&] (int64_t gen, sstring first_key, sstring last_key) mutable {
             auto sst = make_sstable(s, "", gen, version, sstables::sstable::format_types::big);
@@ -4276,7 +4274,7 @@ SEASTAR_TEST_CASE(test_wrong_counter_shard_order) {
         //      -replication-factor 3 -partition-count 2 -clustering-row-count 4
         // on a three-node Scylla 1.7.4 cluster.
     return seastar::async([] {
-        for (const auto version : versions) {
+        for (const auto version : get_all_version_types()) {
             auto s = schema_builder("scylla_bench", "test_counters")
                     .with_column("pk", long_type, column_kind::partition_key)
                     .with_column("ck", long_type, column_kind::clustering_key)
@@ -4465,7 +4463,7 @@ SEASTAR_TEST_CASE(test_broken_promoted_index_is_skipped) {
     // insert into ks.test (pk, ck, v) values (1, 3, 1);
     // delete from ks.test where pk = 1 and ck = 2;
     return seastar::async([] {
-        for (const auto version : versions) {
+        for (const auto version : get_all_version_types()) {
             auto s = schema_builder("ks", "test")
                     .with_column("pk", int32_type, column_kind::partition_key)
                     .with_column("ck", int32_type, column_kind::clustering_key)
@@ -4492,7 +4490,7 @@ SEASTAR_TEST_CASE(test_old_format_non_compound_range_tombstone_is_read) {
     // insert into ks.test (pk, ck, v) values (1, 3, 1);
     // delete from ks.test where pk = 1 and ck = 2;
     return seastar::async([] {
-        for (const auto version : versions) {
+        for (const auto version : get_all_version_types()) {
             auto s = schema_builder("ks", "test")
                     .with_column("pk", int32_type, column_kind::partition_key)
                     .with_column("ck", int32_type, column_kind::clustering_key)
