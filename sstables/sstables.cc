@@ -2609,9 +2609,11 @@ future<> sstable::set_generation(int64_t new_generation) {
     });
 }
 
-entry_descriptor entry_descriptor::make_descriptor(sstring fname) {
+entry_descriptor entry_descriptor::make_descriptor(sstring sstdir, sstring fname) {
     static std::regex la("la-(\\d+)-(\\w+)-(.*)");
     static std::regex ka("(\\w+)-(\\w+)-ka-(\\d+)-(.*)");
+
+    static std::regex dir(".*/([^/]*)/(\\w+)-[\\da-fA-F]+/?");
 
     std::smatch match;
 
@@ -2625,8 +2627,13 @@ entry_descriptor entry_descriptor::make_descriptor(sstring fname) {
 
     std::string s(fname);
     if (std::regex_match(s, match, la)) {
-        sstring ks = "";
-        sstring cf = "";
+        std::string sdir(sstdir);
+        std::smatch dirmatch;
+        if (!std::regex_match(sdir, dirmatch, dir)) {
+            throw malformed_sstable_exception(sprint("File %s with invalid path %s. Path doesn't match any known version.", sstdir));
+        }
+        sstring ks = dirmatch[1].str();
+        sstring cf = dirmatch[2].str();
         version = sstable::version_types::la;
         generation = match[1].str();
         format = sstring(match[2].str());
