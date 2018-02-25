@@ -2633,7 +2633,7 @@ entry_descriptor entry_descriptor::make_descriptor(sstring sstdir, sstring fname
             ks = dirmatch[1].str();
             cf = dirmatch[2].str();
         } else {
-            //throw malformed_sstable_exception(sprint("File %s with invalid path %s. Path doesn't match any known version.", fname, sstdir));
+            // Without this sstable_test fails because test data files aren't stored in directory with the proper path components.
             ks = "";
             cf = "";
         }
