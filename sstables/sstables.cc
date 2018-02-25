@@ -2629,11 +2629,14 @@ entry_descriptor entry_descriptor::make_descriptor(sstring sstdir, sstring fname
     if (std::regex_match(s, match, la)) {
         std::string sdir(sstdir);
         std::smatch dirmatch;
-        if (!std::regex_match(sdir, dirmatch, dir)) {
-            throw malformed_sstable_exception(sprint("File %s with invalid path %s. Path doesn't match any known version.", sstdir));
+        if (std::regex_match(sdir, dirmatch, dir)) {
+            ks = dirmatch[1].str();
+            cf = dirmatch[2].str();
+        } else {
+            //throw malformed_sstable_exception(sprint("File %s with invalid path %s. Path doesn't match any known version.", fname, sstdir));
+            ks = "";
+            cf = "";
         }
-        ks = dirmatch[1].str();
-        cf = dirmatch[2].str();
         version = sstable::version_types::la;
         generation = match[1].str();
         format = sstring(match[2].str());
