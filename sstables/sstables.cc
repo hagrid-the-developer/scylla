@@ -221,6 +221,7 @@ std::unordered_map<sstable::component_type, sstring, enum_hash<sstable::componen
 // reverse mapping, even if it is done at runtime.
 template <typename Map>
 static typename Map::key_type reverse_map(const typename Map::mapped_type& value, Map& map) {
+    sstlog.debug("XYZ: reverse_map: value: {}", value);
     for (auto& pair: map) {
         if (pair.second == value) {
             return pair.first;
@@ -2625,6 +2626,7 @@ entry_descriptor entry_descriptor::make_descriptor(sstring sstdir, sstring fname
     sstring ks;
     sstring cf;
 
+    sstlog.debug("XYZ: sstdir: {}; fname: {}", sstdir, fname);
     std::string s(fname);
     if (std::regex_match(s, match, la)) {
         std::string sdir(sstdir);
