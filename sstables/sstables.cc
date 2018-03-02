@@ -221,7 +221,6 @@ std::unordered_map<sstable::component_type, sstring, enum_hash<sstable::componen
 // reverse mapping, even if it is done at runtime.
 template <typename Map>
 static typename Map::key_type reverse_map(const typename Map::mapped_type& value, Map& map) {
-    sstlog.debug("XYZ: reverse_map: value: {}", value);
     for (auto& pair: map) {
         if (pair.second == value) {
             return pair.first;
@@ -2626,7 +2625,7 @@ entry_descriptor entry_descriptor::make_descriptor(sstring sstdir, sstring fname
     sstring ks;
     sstring cf;
 
-    sstlog.debug("XYZ: sstdir: {}; fname: {}", sstdir, fname);
+    sstlog.debug("Make descriptor sstdir: {}; fname: {}", sstdir, fname);
     std::string s(fname);
     if (std::regex_match(s, match, la)) {
         std::string sdir(sstdir);
@@ -2657,11 +2656,19 @@ entry_descriptor entry_descriptor::make_descriptor(sstring sstdir, sstring fname
 }
 
 sstable::version_types sstable::version_from_sstring(sstring &s) {
-    return reverse_map(s, _version_string);
+    try {
+        return reverse_map(s, _version_string);
+    } catch (std::out_of_range&) {
+        throw std::out_of_range(seastar::sprint("Unknown version: %s", s.c_str()));
+    }
 }
 
 sstable::format_types sstable::format_from_sstring(sstring &s) {
-    return reverse_map(s, _format_string);
+    try {
+        return reverse_map(s, _format_string);
+    } catch (std::out_of_range&) {
+        throw std::out_of_range(seastar::sprint("Unknown format: %s", s.c_str()));
+    }
 }
 
 sstable::component_type sstable::component_from_sstring(sstring &s) {
