@@ -25,6 +25,7 @@
 #include "dht/i_partitioner.hh"
 #include <boost/range/irange.hpp>
 #include <boost/range/adaptor/map.hpp>
+#include <array>
 
 sstables::shared_sstable make_sstable_containing(std::function<sstables::shared_sstable()> sst_factory, std::vector<mutation> muts);
 
@@ -60,4 +61,8 @@ static std::vector<sstring> make_local_keys(unsigned n, const schema_ptr& s, siz
 //
 inline sstring make_local_key(const schema_ptr& s, size_t min_key_size = 1) {
     return make_local_keys(1, s, min_key_size).front();
+}
+
+constexpr inline auto get_all_version_types() {
+    return std::array{sstables::sstable::version_types::ka, sstables::sstable::version_types::la};
 }
