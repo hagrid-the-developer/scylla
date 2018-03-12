@@ -30,6 +30,7 @@
 #include "sstables/sstables.hh"
 #include "sstables/compaction_manager.hh"
 #include "sstables/key.hh"
+#include "sstable_utils.hh"
 #include "tests/test-utils.hh"
 #include "schema.hh"
 #include "compress.hh"
@@ -1010,8 +1011,9 @@ static schema_ptr large_partition_schema() {
 }
 
 static future<shared_sstable> load_large_partition_sst() {
-    auto sst = make_sstable(large_partition_schema(), "tests/sstables/large_partition", 3,
-            sstables::sstable::version_types::ka, big);
+    auto s = large_partition_schema();
+    auto sst = make_sstable(s, get_test_dir("large_partition", s), 3,
+            sstables::sstable::version_types::la, big);
     auto fut = sst->load();
     return std::move(fut).then([sst = std::move(sst)] {
         return std::move(sst);
@@ -1244,11 +1246,13 @@ SEASTAR_TEST_CASE(promoted_index_write) {
         mtp->apply(std::move(m));
         auto sst = make_sstable(s,
                 "tests/sstables/tests-temporary", 100,
-                sstables::sstable::version_types::ka, big);
+                sstables::sstable::version_types::la, big);
         return write_memtable_to_sstable(*mtp, sst).then([s] {
+            auto s = large_partition_schema();
+            auto large_partition_file = seastar::sprint("%s/la-3-big-Index.db", get_test_dir("large_partition", s));
             return compare_files(
-                    "tests/sstables/large_partition/try1-data-ka-3-Index.db",
-                    "tests/sstables/tests-temporary/try1-data-ka-100-Index.db");
+                    large_partition_file,
+                    "tests/sstables/tests-temporary/la-100-big-Index.db");
         }).then([sst, mtp] {});
     });
 }

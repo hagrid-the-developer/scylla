@@ -60,66 +60,70 @@ static schema_ptr get_schema() {
     return builder.build();
 }
 
+static const std::vector versions{sstables::sstable::version_types::ka, sstables::sstable::version_types::la};
+
 void run_sstable_resharding_test() {
-    storage_service_for_tests ssft;
-    auto tmp = make_lw_shared<tmpdir>();
-    auto s = get_schema();
-    auto cm = make_lw_shared<compaction_manager>();
-    auto cl_stats = make_lw_shared<cell_locker_stats>();
-    auto cf = make_lw_shared<column_family>(s, column_family::config(), column_family::no_commitlog(), *cm, *cl_stats);
-    cf->mark_ready_for_writes();
-    std::unordered_map<shard_id, mutation> muts;
+    for (const auto version : versions) {
+        storage_service_for_tests ssft;
+        auto tmp = make_lw_shared<tmpdir>();
+        auto s = get_schema();
+        auto cm = make_lw_shared<compaction_manager>();
+        auto cl_stats = make_lw_shared<cell_locker_stats>();
+        auto cf = make_lw_shared<column_family>(s, column_family::config(), column_family::no_commitlog(), *cm, *cl_stats);
+        cf->mark_ready_for_writes();
+        std::unordered_map<shard_id, mutation> muts;
 
-    // create sst shared by all shards
-    {
-        auto mt = make_lw_shared<memtable>(s);
-        auto get_mutation = [mt, s] (sstring key_to_write, auto value) {
-            auto key = partition_key::from_exploded(*s, {to_bytes(key_to_write)});
-            mutation m(s, key);
-            m.set_clustered_cell(clustering_key::make_empty(), bytes("value"), data_value(int32_t(value)), api::timestamp_type(0));
-            return m;
-        };
-        for (auto i : boost::irange(0u, smp::count)) {
-            auto key_token_pair = token_generation_for_shard(i, 1);
-            BOOST_REQUIRE(key_token_pair.size() == 1);
-            auto m = get_mutation(key_token_pair[0].first, i);
-            muts.emplace(i, m);
-            mt->apply(std::move(m));
+        // create sst shared by all shards
+        {
+            auto mt = make_lw_shared<memtable>(s);
+            auto get_mutation = [mt, s] (sstring key_to_write, auto value) {
+                auto key = partition_key::from_exploded(*s, {to_bytes(key_to_write)});
+                mutation m(s, key);
+                m.set_clustered_cell(clustering_key::make_empty(), bytes("value"), data_value(int32_t(value)), api::timestamp_type(0));
+                return m;
+            };
+            for (auto i : boost::irange(0u, smp::count)) {
+                auto key_token_pair = token_generation_for_shard(i, 1);
+                BOOST_REQUIRE(key_token_pair.size() == 1);
+                auto m = get_mutation(key_token_pair[0].first, i);
+                muts.emplace(i, m);
+                mt->apply(std::move(m));
+            }
+            auto sst = sstables::make_sstable(s, tmp->path, 0, version, sstables::sstable::format_types::big);
+            write_memtable_to_sstable(*mt, sst).get();
         }
-        auto sst = sstables::make_sstable(s, tmp->path, 0, sstables::sstable::version_types::ka, sstables::sstable::format_types::big);
-        write_memtable_to_sstable(*mt, sst).get();
-    }
-    auto sst = sstables::make_sstable(s, tmp->path, 0, sstables::sstable::version_types::ka, sstables::sstable::format_types::big);
-    sst->load().get();
-    sst->set_unshared();
+        auto sst = sstables::make_sstable(s, tmp->path, 0, version, sstables::sstable::format_types::big);
+        sst->load().get();
+        sst->set_unshared();
 
-    auto creator = [&cf, tmp] (shard_id shard) mutable {
-        // we need generation calculated by instance of cf at requested shard,
-        // or resource usage wouldn't be fairly distributed among shards.
-        auto gen = smp::submit_to(shard, [&cf] () {
-            return column_family_test::calculate_generation_for_new_table(*cf);
-        }).get0();
+        auto creator = [&cf, tmp, version] (shard_id shard) mutable {
+            // we need generation calculated by instance of cf at requested shard,
+            // or resource usage wouldn't be fairly distributed among shards.
+            auto gen = smp::submit_to(shard, [&cf] () {
+                return column_family_test::calculate_generation_for_new_table(*cf);
+            }).get0();
 
-        auto sst = sstables::make_sstable(cf->schema(), tmp->path, gen,
-            sstables::sstable::version_types::ka, sstables::sstable::format_types::big,
-            gc_clock::now(), default_io_error_handler_gen());
-        return sst;
-    };
-    auto new_sstables = sstables::reshard_sstables({ sst }, *cf, creator, std::numeric_limits<uint64_t>::max(), 0).get0();
-    BOOST_REQUIRE(new_sstables.size() == smp::count);
+            auto sst = sstables::make_sstable(cf->schema(), tmp->path, gen,
+                                              version, sstables::sstable::format_types::big,
+                                              gc_clock::now(), default_io_error_handler_gen());
+            return sst;
+        };
+        auto new_sstables = sstables::reshard_sstables({ sst }, *cf, creator, std::numeric_limits<uint64_t>::max(), 0).get0();
+        BOOST_REQUIRE(new_sstables.size() == smp::count);
 
-    for (auto& sstable : new_sstables) {
-        auto new_sst = sstables::make_sstable(s, tmp->path, sstable->generation(),
-            sstables::sstable::version_types::ka, sstables::sstable::format_types::big);
-        new_sst->load().get();
-        auto shards = new_sst->get_shards_for_this_sstable();
-        BOOST_REQUIRE(shards.size() == 1); // check sstable is unshared.
-        auto shard = shards.front();
-        BOOST_REQUIRE(column_family_test::calculate_shard_from_sstable_generation(new_sst->generation()) == shard);
+        for (auto& sstable : new_sstables) {
+            auto new_sst = sstables::make_sstable(s, tmp->path, sstable->generation(),
+                                                  version, sstables::sstable::format_types::big);
+            new_sst->load().get();
+            auto shards = new_sst->get_shards_for_this_sstable();
+            BOOST_REQUIRE(shards.size() == 1); // check sstable is unshared.
+            auto shard = shards.front();
+            BOOST_REQUIRE(column_family_test::calculate_shard_from_sstable_generation(new_sst->generation()) == shard);
 
-        assert_that(new_sst->as_mutation_source().make_reader(s))
-            .produces(muts.at(shard))
-            .produces_end_of_stream();
+            assert_that(new_sst->as_mutation_source().make_reader(s))
+                    .produces(muts.at(shard))
+                    .produces_end_of_stream();
+        }
     }
 }
 

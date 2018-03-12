@@ -2634,9 +2634,7 @@ entry_descriptor entry_descriptor::make_descriptor(sstring sstdir, sstring fname
             ks = dirmatch[1].str();
             cf = dirmatch[2].str();
         } else {
-            // Without this sstable_test fails because test data files aren't stored in directory with the proper path components.
-            ks = "";
-            cf = "";
+            throw malformed_sstable_exception(sprint("invalid version for file %s with path %s. Path doesn't match known pattern.", fname.c_str(), sstdir.c_str()));
         }
         version = sstable::version_types::la;
         generation = match[1].str();
@@ -2659,7 +2657,7 @@ sstable::version_types sstable::version_from_sstring(sstring &s) {
     try {
         return reverse_map(s, _version_string);
     } catch (std::out_of_range&) {
-        throw std::out_of_range(seastar::sprint("Unknown version: %s", s.c_str()));
+        throw std::out_of_range(seastar::sprint("Unknown sstable version: %s", s.c_str()));
     }
 }
 
@@ -2667,7 +2665,7 @@ sstable::format_types sstable::format_from_sstring(sstring &s) {
     try {
         return reverse_map(s, _format_string);
     } catch (std::out_of_range&) {
-        throw std::out_of_range(seastar::sprint("Unknown format: %s", s.c_str()));
+        throw std::out_of_range(seastar::sprint("Unknown sstable format: %s", s.c_str()));
     }
 }
 

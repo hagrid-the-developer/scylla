@@ -21,10 +21,13 @@
 
 #pragma once
 
+#include "seastar/core/print.hh"
 #include "sstables/sstables.hh"
 #include "dht/i_partitioner.hh"
+#include "schema_builder.hh"
 #include <boost/range/irange.hpp>
 #include <boost/range/adaptor/map.hpp>
+#include <array>
 
 sstables::shared_sstable make_sstable_containing(std::function<sstables::shared_sstable()> sst_factory, std::vector<mutation> muts);
 
@@ -60,4 +63,18 @@ static std::vector<sstring> make_local_keys(unsigned n, const schema_ptr& s, siz
 //
 inline sstring make_local_key(const schema_ptr& s, size_t min_key_size = 1) {
     return make_local_keys(1, s, min_key_size).front();
+}
+
+constexpr inline auto get_all_version_types() {
+    return std::array{sstables::sstable::version_types::ka, sstables::sstable::version_types::la};
+}
+
+inline auto get_test_dir(const sstring& name, const sstring& ks, const sstring& cf)
+{
+    return seastar::sprint("tests/sstables/%s/%s/%s-1c6ace40fad111e7b9cf000000000002", name, ks, cf);
+}
+
+inline auto get_test_dir(const sstring& name, const schema_ptr s)
+{
+    return seastar::sprint("tests/sstables/%s/%s/%s-1c6ace40fad111e7b9cf000000000002", name, s->ks_name(), s->cf_name());
 }
