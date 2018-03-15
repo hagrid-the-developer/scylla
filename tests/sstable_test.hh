@@ -200,6 +200,16 @@ public:
     }
 };
 
+inline auto get_test_dir(const sstring& name, const sstring& ks, const sstring& cf)
+{
+    return seastar::sprint("tests/sstables/%s/%s/%s-1c6ace40fad111e7b9cf000000000002", name, ks, cf);
+}
+
+inline auto get_test_dir(const sstring& name, const schema_ptr s)
+{
+    return seastar::sprint("tests/sstables/%s/%s/%s-1c6ace40fad111e7b9cf000000000002", name, s->ks_name(), s->cf_name());
+}
+
 inline future<sstable_ptr> reusable_sst(schema_ptr schema, sstring dir, unsigned long generation) {
     auto sst = sstables::make_sstable(std::move(schema), dir, generation, la, big);
     auto fut = sst->load();
@@ -328,6 +338,14 @@ inline schema_ptr uncompressed_schema(int32_t min_index_interval = 0) {
        return builder.build(schema_builder::compact_storage::no);
     }();
     return uncompressed;
+}
+
+inline auto uncompressed_dir() {
+    return get_test_dir("uncompressed", uncompressed_schema());
+}
+
+inline auto generation_dir() {
+    return get_test_dir("generation", uncompressed_schema());
 }
 
 inline schema_ptr complex_schema() {
@@ -637,6 +655,7 @@ public:
     static future<> do_with_test_directory(std::function<future<> ()>&& fut, sstring p = path()) {
         return seastar::async([p, fut = std::move(fut)] {
             storage_service_for_tests ssft;
+            boost::filesystem::create_directories(std::string(p));
             test_setup::create_empty_test_dir(p).get();
             fut().get();
             test_setup::empty_test_dir(p).get();

@@ -68,13 +68,3 @@ inline sstring make_local_key(const schema_ptr& s, size_t min_key_size = 1) {
 constexpr inline auto get_all_version_types() {
     return std::array{sstables::sstable::version_types::ka, sstables::sstable::version_types::la};
 }
-
-inline auto get_test_dir(const sstring& name, const sstring& ks, const sstring& cf)
-{
-    return seastar::sprint("tests/sstables/%s/%s/%s-1c6ace40fad111e7b9cf000000000002", name, ks, cf);
-}
-
-inline auto get_test_dir(const sstring& name, const schema_ptr s)
-{
-    return seastar::sprint("tests/sstables/%s/%s/%s-1c6ace40fad111e7b9cf000000000002", name, s->ks_name(), s->cf_name());
-}

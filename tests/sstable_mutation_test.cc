@@ -46,7 +46,7 @@ using namespace sstables;
 
 
 SEASTAR_TEST_CASE(nonexistent_key) {
-    return reusable_sst(uncompressed_schema(), "tests/sstables/uncompressed", 1).then([] (auto sstp) {
+    return reusable_sst(uncompressed_schema(), uncompressed_dir(), 1).then([] (auto sstp) {
         return do_with(make_dkey(uncompressed_schema(), "invalid_key"), [sstp] (auto& key) {
             auto s = uncompressed_schema();
             auto rd = make_lw_shared<flat_mutation_reader>(sstp->read_row_flat(s, key));
@@ -59,7 +59,7 @@ SEASTAR_TEST_CASE(nonexistent_key) {
 }
 
 future<> test_no_clustered(bytes&& key, std::unordered_map<bytes, data_value> &&map) {
-    return reusable_sst(uncompressed_schema(), "tests/sstables/uncompressed", 1).then([k = std::move(key), map = std::move(map)] (auto sstp) mutable {
+    return reusable_sst(uncompressed_schema(), uncompressed_dir(), 1).then([k = std::move(key), map = std::move(map)] (auto sstp) mutable {
         return do_with(make_dkey(uncompressed_schema(), std::move(k)), [sstp, map = std::move(map)] (auto& key) {
             auto s = uncompressed_schema();
             auto rd = make_lw_shared<flat_mutation_reader>(sstp->read_row_flat(s, key));
@@ -308,7 +308,7 @@ SEASTAR_TEST_CASE(complex_sst3_k2) {
 }
 
 future<> test_range_reads(const dht::token& min, const dht::token& max, std::vector<bytes>& expected) {
-    return reusable_sst(uncompressed_schema(), "tests/sstables/uncompressed", 1).then([min, max, &expected] (auto sstp) mutable {
+    return reusable_sst(uncompressed_schema(), uncompressed_dir(), 1).then([min, max, &expected] (auto sstp) mutable {
         auto s = uncompressed_schema();
         auto count = make_lw_shared<size_t>(0);
         auto expected_size = expected.size();
