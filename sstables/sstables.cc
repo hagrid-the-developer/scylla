@@ -2634,7 +2634,7 @@ entry_descriptor entry_descriptor::make_descriptor(sstring sstdir, sstring fname
             ks = dirmatch[1].str();
             cf = dirmatch[2].str();
         } else {
-            throw malformed_sstable_exception(sprint("invalid version for file %s with path %s. Path doesn't match known pattern.", fname, sstdir));
+            throw malformed_sstable_exception(seastar::sprint("invalid version for file %s with path %s. Path doesn't match known pattern.", fname, sstdir));
         }
         version = sstable::version_types::la;
         generation = match[1].str();
@@ -2648,7 +2648,7 @@ entry_descriptor entry_descriptor::make_descriptor(sstring sstdir, sstring fname
         generation = match[3].str();
         component = sstring(match[4].str());
     } else {
-        throw malformed_sstable_exception(sprint("invalid version for file %s. Name doesn't match any known version.", fname));
+        throw malformed_sstable_exception(seastar::sprint("invalid version for file %s. Name doesn't match any known version.", fname));
     }
     return entry_descriptor(ks, cf, version, boost::lexical_cast<unsigned long>(generation), sstable::format_from_sstring(format), sstable::component_from_sstring(component));
 }
