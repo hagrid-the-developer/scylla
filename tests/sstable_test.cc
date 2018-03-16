@@ -1010,10 +1010,10 @@ static schema_ptr large_partition_schema() {
     return s;
 }
 
-static future<shared_sstable> load_large_partition_sst() {
+static future<shared_sstable> load_large_partition_sst(const sstables::sstable::version_types version) {
     auto s = large_partition_schema();
     auto sst = make_sstable(s, get_test_dir("large_partition", s), 3,
-            sstables::sstable::version_types::la, big);
+                            version, big);
     auto fut = sst->load();
     return std::move(fut).then([sst = std::move(sst)] {
         return std::move(sst);
@@ -1025,11 +1025,13 @@ static future<shared_sstable> load_large_partition_sst() {
 // is read from disk, as an unparsed array, and doesn't actually use it to
 // search for anything.
 SEASTAR_TEST_CASE(promoted_index_read) {
-    return load_large_partition_sst().then([] (auto sstp) {
-        schema_ptr s = large_partition_schema();
-        return sstables::test(sstp).read_indexes().then([sstp] (index_list vec) {
-            BOOST_REQUIRE(vec.size() == 1);
-            BOOST_REQUIRE(vec.front().get_promoted_index_bytes().size() == 468);
+    return seastar::do_for_each(get_all_version_types(), [] (const sstables::sstable::version_types version) {
+        return load_large_partition_sst(version).then([] (auto sstp) {
+            schema_ptr s = large_partition_schema();
+            return sstables::test(sstp).read_indexes().then([sstp] (index_list vec) {
+                BOOST_REQUIRE(vec.size() == 1);
+                BOOST_REQUIRE(vec.front().get_promoted_index_bytes().size() == 468);
+            });
         });
     });
 }
@@ -1130,61 +1132,63 @@ static future<int> count_rows(sstable_ptr sstp, schema_ptr s, sstring ck1, sstri
 // of read from disk, add printouts to the row reading code.
 SEASTAR_TEST_CASE(sub_partition_read) {
     schema_ptr s = large_partition_schema();
-    return load_large_partition_sst().then([s] (auto sstp) {
-        return count_rows(sstp, s, "v1", "18wX", "18xB").then([] (int nrows) {
-            // there should be 5 rows (out of 13520 = 20*26*26) in this range:
-            // 18wX, 18wY, 18wZ, 18xA, 18xB.
-            BOOST_REQUIRE(nrows == 5);
-        }).then([sstp, s] () {
-            return count_rows(sstp, s, "v1", "13aB", "15aA").then([] (int nrows) {
-                // There should be 26*26*2 rows in this range. It spans two
-                // promoted-index blocks, so we get to test that case.
-                BOOST_REQUIRE(nrows == 2*26*26);
-            });
-        }).then([sstp, s] () {
-            return count_rows(sstp, s, "v1", "10aB", "19aA").then([] (int nrows) {
-                // There should be 26*26*9 rows in this range. It spans many
-                // promoted-index blocks.
-                BOOST_REQUIRE(nrows == 9*26*26);
-            });
-        }).then([sstp, s] () {
-            return count_rows(sstp, s, "v1", "0", "z").then([] (int nrows) {
-                // All rows, 20*26*26 of them, are in this range. It spans all
-                // the promoted-index blocks, but the range is still bounded
-                // on both sides
-                BOOST_REQUIRE(nrows == 20*26*26);
-            });
-        }).then([sstp, s] () {
-            // range that is outside (after) the actual range of the data.
-            // No rows should match.
-            return count_rows(sstp, s, "v1", "y", "z").then([] (int nrows) {
-                BOOST_REQUIRE(nrows == 0);
-            });
-        }).then([sstp, s] () {
-            // range that is outside (before) the actual range of the data.
-            // No rows should match.
-            return count_rows(sstp, s, "v1", "_a", "_b").then([] (int nrows) {
-                BOOST_REQUIRE(nrows == 0);
-            });
-        }).then([sstp, s] () {
-            // half-infinite range
-            return count_rows(sstp, s, "v1", "", "10aA").then([] (int nrows) {
-                BOOST_REQUIRE(nrows == (1*26*26 + 1));
-            });
-        }).then([sstp, s] () {
-            // half-infinite range
-            return count_rows(sstp, s, "v1", "10aA", "").then([] (int nrows) {
-                BOOST_REQUIRE(nrows == 19*26*26);
-            });
-        }).then([sstp, s] () {
-            // count all rows, but giving an explicit all-encompasing filter
-            return count_rows(sstp, s, "v1", "", "").then([] (int nrows) {
-                BOOST_REQUIRE(nrows == 20*26*26);
-            });
-        }).then([sstp, s] () {
-            // count all rows, without a filter
-            return count_rows(sstp, s, "v1").then([] (int nrows) {
-                BOOST_REQUIRE(nrows == 20*26*26);
+    return seastar::do_for_each(get_all_version_types(), [s] (const sstables::sstable::version_types version) {
+        return load_large_partition_sst(version).then([s] (auto sstp) {
+            return count_rows(sstp, s, "v1", "18wX", "18xB").then([] (int nrows) {
+                // there should be 5 rows (out of 13520 = 20*26*26) in this range:
+                // 18wX, 18wY, 18wZ, 18xA, 18xB.
+                BOOST_REQUIRE(nrows == 5);
+            }).then([sstp, s] () {
+                return count_rows(sstp, s, "v1", "13aB", "15aA").then([] (int nrows) {
+                    // There should be 26*26*2 rows in this range. It spans two
+                    // promoted-index blocks, so we get to test that case.
+                    BOOST_REQUIRE(nrows == 2*26*26);
+                });
+            }).then([sstp, s] () {
+                return count_rows(sstp, s, "v1", "10aB", "19aA").then([] (int nrows) {
+                    // There should be 26*26*9 rows in this range. It spans many
+                    // promoted-index blocks.
+                    BOOST_REQUIRE(nrows == 9*26*26);
+                });
+            }).then([sstp, s] () {
+                return count_rows(sstp, s, "v1", "0", "z").then([] (int nrows) {
+                    // All rows, 20*26*26 of them, are in this range. It spans all
+                    // the promoted-index blocks, but the range is still bounded
+                    // on both sides
+                    BOOST_REQUIRE(nrows == 20*26*26);
+                });
+            }).then([sstp, s] () {
+                // range that is outside (after) the actual range of the data.
+                // No rows should match.
+                return count_rows(sstp, s, "v1", "y", "z").then([] (int nrows) {
+                    BOOST_REQUIRE(nrows == 0);
+                });
+            }).then([sstp, s] () {
+                // range that is outside (before) the actual range of the data.
+                // No rows should match.
+                return count_rows(sstp, s, "v1", "_a", "_b").then([] (int nrows) {
+                    BOOST_REQUIRE(nrows == 0);
+                });
+            }).then([sstp, s] () {
+                // half-infinite range
+                return count_rows(sstp, s, "v1", "", "10aA").then([] (int nrows) {
+                    BOOST_REQUIRE(nrows == (1*26*26 + 1));
+                });
+            }).then([sstp, s] () {
+                // half-infinite range
+                return count_rows(sstp, s, "v1", "10aA", "").then([] (int nrows) {
+                    BOOST_REQUIRE(nrows == 19*26*26);
+                });
+            }).then([sstp, s] () {
+                // count all rows, but giving an explicit all-encompasing filter
+                return count_rows(sstp, s, "v1", "", "").then([] (int nrows) {
+                    BOOST_REQUIRE(nrows == 20*26*26);
+                });
+            }).then([sstp, s] () {
+                // count all rows, without a filter
+                return count_rows(sstp, s, "v1").then([] (int nrows) {
+                    BOOST_REQUIRE(nrows == 20*26*26);
+                });
             });
         });
     });
@@ -1195,9 +1199,11 @@ SEASTAR_TEST_CASE(sub_partition_read) {
 // sstable, there is actually just one partition).
 SEASTAR_TEST_CASE(sub_partitions_read) {
     schema_ptr s = large_partition_schema();
-    return load_large_partition_sst().then([s] (auto sstp) {
-        return count_rows(sstp, s, "18wX", "18xB").then([] (int nrows) {
-            BOOST_REQUIRE(nrows == 5);
+    return seastar::do_for_each(get_all_version_types(), [s] (auto version) {
+        return load_large_partition_sst(version).then([s] (auto sstp) {
+            return count_rows(sstp, s, "18wX", "18xB").then([] (int nrows) {
+                BOOST_REQUIRE(nrows == 5);
+            });
         });
     });
 }

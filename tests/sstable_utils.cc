@@ -68,4 +68,3 @@ sstables::shared_sstable make_sstable_containing(std::function<sstables::shared_
 
     return sst;
 }
-
