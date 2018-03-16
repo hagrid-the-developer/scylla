@@ -2634,10 +2634,7 @@ entry_descriptor entry_descriptor::make_descriptor(sstring sstdir, sstring fname
             ks = dirmatch[1].str();
             cf = dirmatch[2].str();
         } else {
-            throw malformed_sstable_exception(sprint("invalid version for file %s with path %s. Path doesn't match known pattern.", fname.c_str(), sstdir.c_str()));
-        //    sstlog.warn("invalid version for file {} with path {}. Path doesn't match known pattern.", fname, sstdir);
-            ks = "";
-            cf = "";
+            throw malformed_sstable_exception(sprint("invalid version for file %s with path %s. Path doesn't match known pattern.", fname, sstdir));
         }
         version = sstable::version_types::la;
         generation = match[1].str();
