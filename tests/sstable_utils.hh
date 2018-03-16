@@ -65,6 +65,7 @@ inline sstring make_local_key(const schema_ptr& s, size_t min_key_size = 1) {
     return make_local_keys(1, s, min_key_size).front();
 }
 
-constexpr inline auto get_all_version_types() {
-    return std::array{sstables::sstable::version_types::ka, sstables::sstable::version_types::la};
+static const std::array<sstables::sstable::version_types, 2>& get_all_version_types() {
+    static std::array versions{sstables::sstable::version_types::ka, sstables::sstable::version_types::la};
+    return versions;
 }
