@@ -655,8 +655,24 @@ public:
     static future<> do_with_test_directory(std::function<future<> ()>&& fut, sstring p = path()) {
         return seastar::async([p, fut = std::move(fut)] {
             storage_service_for_tests ssft;
+            boost::filesystem::path created_path{};
+            for (auto x: boost::filesystem::path{std::string{p}})
+            {
+                std::cerr << "XYZ: x: " << x << ';' << created_path << ';' <<  std::endl;
+                created_path /= x;
+                system(seastar::sprint("ls -l %s", created_path.native().c_str()).c_str());
+                if (!boost::filesystem::exists(created_path))
+                {
+                    break;
+                }
+            }
+            if (boost::filesystem::exists(created_path))
+            {
+                created_path = boost::filesystem::path{};
+            }
+
+            std::cerr << "XYZ: Created path: " << created_path.native() << "; bool: " << created_path.empty() << std::endl;
             boost::filesystem::create_directories(std::string(p));
-            test_setup::create_empty_test_dir(p).get();
             fut().get();
             test_setup::empty_test_dir(p).get();
             engine().remove_file(p).get();
