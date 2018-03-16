@@ -1229,8 +1229,8 @@ static future<> compare_files(sstring file1, sstring file2) {
 // we have a problem in our promoted index writing code (or in the data
 // writing code, because the promoted index points to offsets in the data).
 SEASTAR_TEST_CASE(promoted_index_write) {
-    return test_setup::do_with_test_directory([] {
-        auto s = large_partition_schema();
+    auto s = large_partition_schema();
+    return test_setup::do_with_test_directory([s] {
         auto mtp = make_lw_shared<memtable>(s);
         auto key = partition_key::from_exploded(*s, {to_bytes("v1")});
         mutation m(s, key);
@@ -1250,7 +1250,6 @@ SEASTAR_TEST_CASE(promoted_index_write) {
             }
         }
         mtp->apply(std::move(m));
-        boost::filesystem::create_directories(get_test_dir("tests-temporary", s));
         auto sst = make_sstable(s,
                 get_test_dir("tests-temporary", s), 100,
                 sstables::sstable::version_types::la, big);
@@ -1260,7 +1259,7 @@ SEASTAR_TEST_CASE(promoted_index_write) {
                     large_partition_file,
                     get_test_dir("tests-temporary", s) + "/la-100-big-Index.db");
         }).then([sst, mtp] {});
-    });
+    }, get_test_dir("tests-temporary", s));
 }
 
 SEASTAR_TEST_CASE(test_skipping_in_compressed_stream) {
