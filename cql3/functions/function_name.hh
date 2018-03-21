@@ -78,6 +78,16 @@ public:
         return !keyspace.empty();
     }
 
+    sstring without_system_keyspace() const {
+        sstring ret;
+        if (!keyspace.empty() && keyspace != db::system_keyspace_name()) {
+            ret += keyspace;
+            ret += ".";
+        }
+        ret += name;
+        return ret;
+    }
+
     bool operator==(const function_name& x) const {
         return keyspace == x.keyspace && name == x.name;
     }

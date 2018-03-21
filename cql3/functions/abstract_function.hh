@@ -94,13 +94,13 @@ public:
         return sprint("%s(%s)", _name, join(", ", column_names));
     }
 
-    virtual void print(std::ostream& os) const override;
+    void print(std::ostream& os) const override;
 };
 
 inline
 void
 abstract_function::print(std::ostream& os) const {
-    os << _name << " : (";
+    os << _name.without_system_keyspace() << " : (";
     for (size_t i = 0; i < _arg_types.size(); ++i) {
         if (i > 0) {
             os << ", ";
