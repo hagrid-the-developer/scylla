@@ -24,6 +24,7 @@
 #include "clocks-impl.hh"
 #include "gc_clock.hh"
 
+#include <boost/date_time/posix_time/posix_time.hpp>
 #include <chrono>
 #include <cstdint>
 #include <ratio>
@@ -64,4 +65,27 @@ gc_clock::time_point to_gc_clock(db_clock::time_point tp) {
     }
 
     return gc_clock::from_time_t(db_clock::to_time_t(tp));
+}
+
+static inline
+db_clock::time_point millis_to_time_point(const int64_t millis) {
+    return db_clock::time_point{std::chrono::milliseconds(millis)};
+}
+
+static inline
+uint32_t time_point_to_date(const db_clock::time_point& tp) {
+    const auto epoch = boost::posix_time::from_time_t(0);
+    auto timestamp = tp.time_since_epoch().count();
+    auto time = boost::posix_time::from_time_t(0) + boost::posix_time::milliseconds(timestamp);
+    const auto diff = time.date() - epoch.date();
+    return uint32_t(diff.days() + (1UL<<31));
+}
+
+static inline
+db_clock::time_point date_to_time_point(const uint32_t date) {
+    const auto epoch = boost::posix_time::from_time_t(0);
+    const auto target_date = epoch + boost::gregorian::days(int64_t(date) - (1UL<<31));
+    boost::posix_time::time_duration duration = target_date - epoch;
+    const auto millis = std::chrono::milliseconds(duration.total_milliseconds());
+    return db_clock::time_point(std::chrono::duration_cast<db_clock::duration>(millis));
 }

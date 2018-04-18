@@ -42,6 +42,10 @@ functions::init() {
     declare(time_uuid_fcts::make_max_timeuuid_fct());
     declare(time_uuid_fcts::make_date_of_fct());
     declare(time_uuid_fcts::make_unix_timestamp_of_fcf());
+    declare(time_uuid_fcts::make_todate_timeuuid_fct());
+    declare(time_uuid_fcts::make_todate_timestamp_fct());
+    declare(time_uuid_fcts::make_totimestamp_timeuuid_fct());
+    declare(time_uuid_fcts::make_totimestamp_date_fct());
     declare(make_uuid_fct());
 
     for (auto&& type : cql3_type::values()) {

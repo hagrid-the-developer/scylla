@@ -763,6 +763,8 @@ public:
                 throw marshal_exception(sprint("Unable to parse timezone '%s'", tz));
             }
             return (t - boost::posix_time::from_time_t(0)).total_milliseconds();
+        } catch (const marshal_exception& e) {
+            throw marshal_exception(sprint("unable to parse date '%s' : %s", s, e.what()));
         } catch (...) {
             throw marshal_exception(sprint("unable to parse date '%s'", s));
         }
@@ -3478,30 +3480,10 @@ std::function<data_value(data_value)> make_castas_fctn_from_decimal_to_string() 
     };
 }
 
-db_clock::time_point millis_to_time_point(const int64_t millis) {
-    return db_clock::time_point{std::chrono::milliseconds(millis)};
-}
-
-simple_date_native_type time_point_to_date(const db_clock::time_point& tp) {
-    const auto epoch = boost::posix_time::from_time_t(0);
-    auto timestamp = tp.time_since_epoch().count();
-    auto time = boost::posix_time::from_time_t(0) + boost::posix_time::milliseconds(timestamp);
-    const auto diff = time.date() - epoch.date();
-    return simple_date_native_type{uint32_t(diff.days() + (1UL<<31))};
-}
-
-db_clock::time_point date_to_time_point(const uint32_t date) {
-    const auto epoch = boost::posix_time::from_time_t(0);
-    const auto target_date = epoch + boost::gregorian::days(int64_t(date) - (1UL<<31));
-    boost::posix_time::time_duration duration = target_date - epoch;
-    const auto millis = std::chrono::milliseconds(duration.total_milliseconds());
-    return db_clock::time_point(std::chrono::duration_cast<db_clock::duration>(millis));
-}
-
 std::function<data_value(data_value)> make_castas_fctn_from_timestamp_to_date() {
     return [](data_value from) -> data_value {
         const auto val_from = value_cast<db_clock::time_point>(from);
-        return time_point_to_date(val_from);
+        return simple_date_native_type{time_point_to_date(val_from)};
     };
 }
 
@@ -3522,7 +3504,7 @@ std::function<data_value(data_value)> make_castas_fctn_from_timeuuid_to_timestam
 std::function<data_value(data_value)> make_castas_fctn_from_timeuuid_to_date() {
     return [](data_value from) -> data_value {
         const auto val_from = value_cast<utils::UUID>(from);
-        return time_point_to_date(millis_to_time_point(utils::UUID_gen::unix_timestamp(val_from)));
+        return simple_date_native_type{time_point_to_date(millis_to_time_point(utils::UUID_gen::unix_timestamp(val_from)))};
     };
 }
 

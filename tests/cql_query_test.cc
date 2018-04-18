@@ -2607,3 +2607,64 @@ SEASTAR_TEST_CASE(test_insert_large_collection_values) {
         });
     });
 }
+
+SEASTAR_TEST_CASE(test_datetime_function_totimestamp_from_timeuuid) {
+    return do_with_cql_env([] (cql_test_env& e) {
+        return e.execute_cql("CREATE TABLE xyz_tmuuid(k int, tmuuid timeuuid, PRIMARY KEY(k));").discard_result().then([&e] {
+        }).then([&e] {
+            return e.execute_cql("INSERT INTO xyz_tmuuid (k, tmuuid) VALUES (1, 0e2d8bc0-430a-11e8-8882-000000000003);").discard_result();
+        }).then([&e] {
+            return e.execute_cql("SELECT totimestamp(tmuuid) FROM xyz_tmuuid;");
+        }).then([&e] (shared_ptr<cql_transport::messages::result_message> msg) {
+            assert_that(msg).is_rows().with_size(1).with_row({
+                { timestamp_type->from_string("2018-04-18T13:11:50.14+0000") }
+            });
+        });
+    });
+}
+
+SEASTAR_TEST_CASE(test_datetime_function_totimestamp_from_date) {
+    return do_with_cql_env([] (cql_test_env& e) {
+        return e.execute_cql("CREATE TABLE xyz_date(k int, d date, PRIMARY KEY(k));").discard_result().then([&e] {
+        }).then([&e] {
+            return e.execute_cql("INSERT INTO xyz_date (k, d) VALUES (1, '1980-11-28');").discard_result();
+        }).then([&e] {
+            return e.execute_cql("SELECT totimestamp(d) FROM xyz_date;");
+        }).then([&e] (shared_ptr<cql_transport::messages::result_message> msg) {
+            assert_that(msg).is_rows().with_size(1).with_row({
+                { timestamp_type->from_string("1980-11-28T00:00:00+0000") }
+            });
+        });
+    });
+}
+
+SEASTAR_TEST_CASE(test_datetime_function_todate_from_timeuuid) {
+    return do_with_cql_env([] (cql_test_env& e) {
+        return e.execute_cql("CREATE TABLE xyz_tmuuid(k int, tmuuid timeuuid, PRIMARY KEY(k));").discard_result().then([&e] {
+        }).then([&e] {
+            return e.execute_cql("INSERT INTO xyz_tmuuid (k, tmuuid) VALUES (1, '0e2d8bc0-430a-11e8-8882-000000000003');").discard_result();
+        }).then([&e] {
+            return e.execute_cql("SELECT todate(tmuuid) FROM xyz_tmuuid;");
+        }).then([&e] (shared_ptr<cql_transport::messages::result_message> msg) {
+            assert_that(msg).is_rows().with_size(1).with_row({
+                { timestamp_type->from_string("2018-04-18") }
+            });
+        });
+    });
+}
+
+SEASTAR_TEST_CASE(test_datetime_function_todate_from_timestamp) {
+    return do_with_cql_env([] (cql_test_env& e) {
+        return e.execute_cql("CREATE TABLE xyz_tm(k int, tm timestamp, PRIMARY KEY(k));").discard_result().then([&e] {
+        }).then([&e] {
+            return e.execute_cql("INSERT INTO xyz_tm (k, tm) VALUES (1, '1980-11-27 23:55:00');").discard_result();
+        }).then([&e] {
+            return e.execute_cql("SELECT todate(tm) FROM xyz_tm;");
+        }).then([&e] (shared_ptr<cql_transport::messages::result_message> msg) {
+            std::cout << "XYZ: " << simple_date_type->to_string(dynamic_cast<cql_transport::messages::result_message::rows&>(*msg).rs().rows().front().front().value()) << std::endl;
+            assert_that(msg).is_rows().with_size(1).with_row({
+                { simple_date_type->from_string("1980-11-27") }
+            });
+        });
+    });
+}

@@ -129,6 +129,146 @@ make_unix_timestamp_of_fcf() {
     });
 }
 
+// :;DF: Begin
+inline
+shared_ptr<function>
+make_todate_timeuuid_fct() {
+    return make_native_scalar_function<true>("todate", date_type, { timeuuid_type },
+            [] (cql_serialization_format sf, const std::vector<bytes_opt>& values) -> bytes_opt {
+        auto& bb = values[0];
+        if (!bb) {
+            return {};
+        }
+        auto uuid_obj = timeuuid_type->deserialize(*bb);
+        if (uuid_obj.is_null()) {
+            return {};
+        }
+        auto uuid = value_cast<utils::UUID>(uuid_obj);
+        const auto tp = millis_to_time_point(utils::UUID_gen::unix_timestamp(uuid));
+        const auto date = time_point_to_date(tp);
+        return {simple_date_type->decompose(simple_date_native_type{date})};
+    });
+}
+
+inline
+shared_ptr<function>
+make_todate_timestamp_fct() {
+    return make_native_scalar_function<true>("todate", date_type, { timestamp_type },
+            [] (cql_serialization_format sf, const std::vector<bytes_opt>& values) -> bytes_opt {
+        auto& bb = values[0];
+        if (!bb) {
+            return {};
+        }
+        auto ts_obj = timestamp_type->deserialize(*bb);
+        if (ts_obj.is_null()) {
+            return {};
+        }
+        auto tp = value_cast<db_clock::time_point>(ts_obj);
+        const uint32_t date = time_point_to_date(tp);
+        return {simple_date_type->decompose(simple_date_native_type{date})};
+    });
+}
+
+
+inline
+shared_ptr<function>
+make_totimestamp_timeuuid_fct() {
+    return make_native_scalar_function<true>("totimestamp", timestamp_type, { timeuuid_type },
+            [] (cql_serialization_format sf, const std::vector<bytes_opt>& values) -> bytes_opt {
+        auto& bb = values[0];
+        if (!bb) {
+            return {};
+        }
+        auto uuid_obj = timeuuid_type->deserialize(*bb);
+        if (uuid_obj.is_null()) {
+            return {};
+        }
+        auto uuid = value_cast<utils::UUID>(uuid_obj);
+        return {timestamp_type->decompose(utils::UUID_gen::unix_timestamp(uuid))};
+    });
+}
+
+inline
+shared_ptr<function>
+make_totimestamp_date_fct() {
+    return make_native_scalar_function<true>("totimestamp", timestamp_type, { simple_date_type },
+            [] (cql_serialization_format sf, const std::vector<bytes_opt>& values) -> bytes_opt {
+        auto& bb = values[0];
+        if (!bb) {
+            return {};
+        }
+        auto date_obj = simple_date_type->deserialize(*bb);
+        if (date_obj.is_null()) {
+            return {};
+        }
+        const auto date = value_cast<uint32_t>(date_obj);
+        const auto tp = date_to_time_point(date);
+        return {timestamp_type->decompose(tp)};
+    });
+}
+
+// :;DF: End
+inline
+shared_ptr<function>
+make_tounixtimestamp_timeuuid_fct() {
+    return make_native_scalar_function<true>("tounixtimestamp", long_type, { timeuuid_type },
+            [] (cql_serialization_format sf, const std::vector<bytes_opt>& values) -> bytes_opt {
+        // FIXME: should values be a vector<optional<bytes>>?
+        auto& bb = values[0];
+        if (!bb) {
+            return {};
+        }
+        auto ts_obj = timestamp_type->deserialize(*bb);
+        if (ts_obj.is_null()) {
+            return {};
+        }
+        auto ts = value_cast<db_clock::time_point>(ts_obj);
+        auto uuid = utils::UUID_gen::max_time_UUID(ts.time_since_epoch().count());
+        return {timeuuid_type->decompose(uuid)};
+    });
+}
+
+#if 0
+inline
+shared_ptr<function>
+make_tounixtimestamp_timestamp_fct() {
+    return make_native_scalar_function<true>("tounixtimestamp", long_type, { timestamp_type },
+            [] (cql_serialization_format sf, const std::vector<bytes_opt>& values) -> bytes_opt {
+        // FIXME: should values be a vector<optional<bytes>>?
+        auto& bb = values[0];
+        if (!bb) {
+            return {};
+        }
+        auto ts_obj = timestamp_type->deserialize(*bb);
+        if (ts_obj.is_null()) {
+            return {};
+        }
+        auto ts = value_cast<db_clock::time_point>(ts_obj);
+        auto uuid = utils::UUID_gen::max_time_UUID(ts.time_since_epoch().count());
+        return {timeuuid_type->decompose(uuid)};
+    });
+}
+
+inline
+shared_ptr<function>
+make_tounixtimestamp_date_fct() {
+    return make_native_scalar_function<true>("tounixtimestamp", long_type, { simple_date_type },
+            [] (cql_serialization_format sf, const std::vector<bytes_opt>& values) -> bytes_opt {
+        // FIXME: should values be a vector<optional<bytes>>?
+        auto& bb = values[0];
+        if (!bb) {
+            return {};
+        }
+        auto ts_obj = timestamp_type->deserialize(*bb);
+        if (ts_obj.is_null()) {
+            return {};
+        }
+        auto ts = value_cast<db_clock::time_point>(ts_obj);
+        auto uuid = utils::UUID_gen::max_time_UUID(ts.time_since_epoch().count());
+        return {timeuuid_type->decompose(uuid)};
+    });
+}
+#endif
 }
 }
 }
