@@ -133,7 +133,7 @@ make_unix_timestamp_of_fcf() {
 inline
 shared_ptr<function>
 make_todate_timeuuid_fct() {
-    return make_native_scalar_function<true>("todate", date_type, { timeuuid_type },
+    return make_native_scalar_function<true>("todate", simple_date_type, { timeuuid_type },
             [] (cql_serialization_format sf, const std::vector<bytes_opt>& values) -> bytes_opt {
         auto& bb = values[0];
         if (!bb) {
@@ -153,7 +153,7 @@ make_todate_timeuuid_fct() {
 inline
 shared_ptr<function>
 make_todate_timestamp_fct() {
-    return make_native_scalar_function<true>("todate", date_type, { timestamp_type },
+    return make_native_scalar_function<true>("todate", simple_date_type, { timestamp_type },
             [] (cql_serialization_format sf, const std::vector<bytes_opt>& values) -> bytes_opt {
         auto& bb = values[0];
         if (!bb) {
